@@ -41,20 +41,13 @@ impl InteractiveTerminal {
     }
 
     fn print_header(&self) {
-        println!("\n{}", "╔════════════════════════════════════════════════════════════════╗".bright_black());
-        println!("{}", "║           CAP SHELL LISTENER - Penelope Style                  ║".bright_cyan());
-        println!("{}", "╚════════════════════════════════════════════════════════════════╝".bright_black());
         println!();
-        println!("{} Listener is {}", "🐚".to_string(), "ACTIVE".bright_green().bold());
-        println!("{} Waiting for incoming reverse shells...", "📡".to_string());
+        println!("{}", "[+] Listening for reverse shells...".green());
         println!();
-        println!("{}", "Keyboard Shortcuts:".bright_yellow());
-        println!("  {} {} - Detach from listener (listener keeps running)", "F12".bright_white().bold(), "or Ctrl+D".bright_black());
-        println!("  {} {} - Stop listener completely and exit", "Ctrl+Q".bright_white().bold(), "or 'q'".bright_black());
-        println!("  {} {} - List all active sessions", "Ctrl+L".bright_white().bold(), "or 'l'".bright_black());
-        println!("  {} {} - Show this help", "Ctrl+H".bright_white().bold(), "or 'h'".bright_black());
-        println!();
-        println!("{}", "─".repeat(64).bright_black());
+        println!("{}  {} to detach (listener keeps running)", "›".bright_black(), "F12 or Ctrl+D".bright_white());
+        println!("{}  {} to stop listener and exit", "›".bright_black(), "Ctrl+Q or q".bright_white());
+        println!("{}  {} to list active sessions", "›".bright_black(), "Ctrl+L or l".bright_white());
+        println!("{}  {} for help", "›".bright_black(), "Ctrl+H or h".bright_white());
         println!();
     }
 
@@ -98,7 +91,7 @@ impl InteractiveTerminal {
 
             // Check if we should stop listener
             if self.should_stop_listener.load(Ordering::Relaxed) {
-                println!("\n{} Stopping listener...", "🛑".to_string());
+                println!("\n{}", "[!] Stopping listener...".yellow());
                 break;
             }
         }
@@ -110,15 +103,13 @@ impl InteractiveTerminal {
         match key.code {
             // F12 or Ctrl+D - Detach (exit but keep listener running)
             KeyCode::F(12) => {
-                println!("\n{} Detaching from listener...", "👋".to_string());
-                println!("{} Listener continues running in background", "✓".green());
-                println!("{} Use {} to see active sessions\n", "💡".to_string(), "cap shell list".cyan());
+                println!("\n{}", "[*] Detaching from listener (continues in background)".bright_black());
+                println!("{} Use {} to see sessions\n", "[*]".bright_black(), "cap shell list".cyan());
                 std::process::exit(0);
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                println!("\n{} Detaching from listener...", "👋".to_string());
-                println!("{} Listener continues running in background", "✓".green());
-                println!("{} Use {} to see active sessions\n", "💡".to_string(), "cap shell list".cyan());
+                println!("\n{}", "[*] Detaching from listener (continues in background)".bright_black());
+                println!("{} Use {} to see sessions\n", "[*]".bright_black(), "cap shell list".cyan());
                 std::process::exit(0);
             }
             // Ctrl+Q or 'q' - Stop listener completely
@@ -144,7 +135,7 @@ impl InteractiveTerminal {
             }
             // Ctrl+C - Force exit
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                println!("\n{} Force exiting...", "⚠".yellow());
+                println!("\n{}", "[!] Exiting...".yellow());
                 std::process::exit(0);
             }
             _ => {}
@@ -158,20 +149,21 @@ impl InteractiveTerminal {
             return;
         }
 
-        println!("\n{} {} Session(s) Active:", "🔔".to_string(), sessions.len().to_string().bright_green());
+        println!("\n{} {} session(s) active", "[+]".green(), sessions.len());
         for (id, state) in sessions {
-            let state_icon = match state {
-                super::session::ShellState::Active => "●".green(),
-                super::session::ShellState::Background => "◐".yellow(),
-                super::session::ShellState::Terminated => "○".red(),
+            let state_str = match state {
+                super::session::ShellState::Active => "ACTIVE".green(),
+                super::session::ShellState::Background => "BACKGROUND".yellow(),
+                super::session::ShellState::Terminated => "TERMINATED".red(),
             };
             
             if let Some(session) = self.manager.get_session(&id) {
                 println!(
-                    "  {} {} | {}",
-                    state_icon,
-                    &id[..12].bright_white(),
-                    session.metadata.remote_addr.cyan()
+                    "{}   {} | {} | {}",
+                    "›".bright_black(),
+                    &id[..8].bright_white(),
+                    session.metadata.remote_addr.cyan(),
+                    state_str
                 );
             }
         }
@@ -181,46 +173,40 @@ impl InteractiveTerminal {
     async fn list_sessions(&self) {
         let sessions = self.manager.list_sessions();
         
-        println!("\n{}", "═".repeat(64).bright_black());
-        println!("{}", "Active Sessions:".bright_cyan());
-        println!("{}", "─".repeat(64).bright_black());
+        println!();
+        println!("{} Active sessions:", "[*]".bright_cyan());
         
         if sessions.is_empty() {
-            println!("{}", "  No active sessions".bright_black());
+            println!("{}   (none)", "›".bright_black());
         } else {
             for (id, state) in sessions {
-                let state_icon = match state {
-                    super::session::ShellState::Active => "●".green(),
-                    super::session::ShellState::Background => "◐".yellow(),
-                    super::session::ShellState::Terminated => "○".red(),
+                let state_str = match state {
+                    super::session::ShellState::Active => "ACTIVE".green(),
+                    super::session::ShellState::Background => "BACKGROUND".yellow(),
+                    super::session::ShellState::Terminated => "TERMINATED".red(),
                 };
                 
                 if let Some(session) = self.manager.get_session(&id) {
                     println!(
-                        "  {} {} | {} | Connected: {}",
-                        state_icon,
-                        &id[..12].yellow(),
+                        "{}   {} | {} | {}",
+                        "›".bright_black(),
+                        &id[..8].bright_white(),
                         session.metadata.remote_addr.cyan(),
-                        session.metadata.connected_at.format("%H:%M:%S").to_string().bright_black()
+                        state_str
                     );
                 }
             }
         }
-        
-        println!("{}", "═".repeat(64).bright_black());
         println!();
     }
 
     fn show_help(&self) {
-        println!("\n{}", "═".repeat(64).bright_black());
-        println!("{}", "CAP Shell Listener - Keyboard Shortcuts:".bright_cyan());
-        println!("{}", "─".repeat(64).bright_black());
-        println!("  {} - Detach from listener (keeps running)", "F12 or Ctrl+D".bright_white());
-        println!("  {} - Stop listener completely", "Ctrl+Q or 'q'".bright_white());
-        println!("  {} - List active sessions", "Ctrl+L or 'l'".bright_white());
-        println!("  {} - Show this help", "Ctrl+H or 'h'".bright_white());
-        println!("  {} - Force exit", "Ctrl+C".bright_white());
-        println!("{}", "═".repeat(64).bright_black());
+        println!();
+        println!("{} Keyboard shortcuts:", "[*]".bright_cyan());
+        println!("{}   {} - Detach (listener keeps running)", "›".bright_black(), "F12 or Ctrl+D".bright_white());
+        println!("{}   {} - Stop listener", "›".bright_black(), "Ctrl+Q or q".bright_white());
+        println!("{}   {} - List sessions", "›".bright_black(), "Ctrl+L or l".bright_white());
+        println!("{}   {} - Show help", "›".bright_black(), "Ctrl+H or h".bright_white());
         println!();
     }
 }

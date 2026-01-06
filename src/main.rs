@@ -184,8 +184,18 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
+    // Check if this is a listen command - suppress logging for clean output
+    let is_listen = matches!(cli.command, Commands::Listen { .. });
+
     // Initialize logging
-    let log_level = if cli.verbose { "debug" } else { "info" };
+    let log_level = if is_listen {
+        "error"  // Only errors for listen command
+    } else if cli.verbose {
+        "debug"
+    } else {
+        "info"
+    };
+    
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -196,12 +206,7 @@ async fn main() -> Result<()> {
 
     // Load configuration (use defaults if file doesn't exist)
     let config = Config::load_or_default("config/default.toml")?;
-    if std::path::Path::new("config/default.toml").exists() {
-        tracing::info!("Configuration loaded from: config/default.toml");
-    } else {
-        tracing::info!("Using default configuration");
-    }
-
+    
     // Initialize session manager
     let session_manager = SessionManager::new(config.clone());
 
@@ -214,7 +219,7 @@ async fn main() -> Result<()> {
             let listen_host = host.clone();
             tokio::spawn(async move {
                 if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
-                    error!("Shell listener error: {}", e);
+                    eprintln!("[!] Shell listener error: {}", e);
                 }
             });
             
