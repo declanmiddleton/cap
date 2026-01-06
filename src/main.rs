@@ -167,6 +167,11 @@ enum ScopeAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Always display banner first, before any processing
+    // This ensures users see the banner even with --help
+    display_banner();
+
+    // Parse CLI arguments
     let cli = Cli::parse();
 
     // Initialize logging
@@ -178,9 +183,6 @@ async fn main() -> Result<()> {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    // Display banner
-    display_banner();
 
     // Load configuration
     let config = Config::load("config/default.toml")?;
