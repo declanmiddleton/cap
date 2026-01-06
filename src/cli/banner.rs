@@ -10,7 +10,8 @@ pub fn display_banner() {
     ╚═════╝╚═╝  ╚═╝╚═╝     
     "#;
 
-    let banner_orange = banner.bright_red().to_string(); // Using bright_red as orange-like
+    // Use TrueColor for vibrant orange (RGB: 255, 140, 0)
+    let banner_orange = banner.truecolor(255, 140, 0).to_string();
     println!("{}", banner_orange);
 
     let subtitle = "  Comprehensive Assessment Platform";
