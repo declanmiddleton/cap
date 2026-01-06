@@ -6,7 +6,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod cli;
 mod core;
-mod listener;
 mod modules;
 mod shell;
 
@@ -28,12 +27,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the CAP listener server
+    /// Start interactive shell listener (Penelope-style)
     Listen {
-        #[arg(short, long, default_value = "127.0.0.1")]
+        #[arg(short, long, default_value = "0.0.0.0")]
         host: String,
 
-        #[arg(short, long, default_value = "8443")]
+        #[arg(short, long, default_value = "4444")]
         port: u16,
     },
 
@@ -108,37 +107,6 @@ enum Commands {
         #[arg(short, long)]
         name: String,
     },
-
-    /// Start shell listener (Penelope-style)
-    Shell {
-        #[command(subcommand)]
-        action: ShellAction,
-    },
-}
-
-#[derive(Subcommand)]
-enum ShellAction {
-    /// Start interactive shell listener
-    Listen {
-        #[arg(short, long, default_value = "0.0.0.0")]
-        host: String,
-
-        #[arg(short, long, default_value = "4444")]
-        port: u16,
-    },
-    /// List active shell sessions
-    List,
-    /// Attach to a shell session interactively
-    Attach {
-        #[arg(short, long)]
-        id: Option<String>,
-    },
-    /// Background a shell session
-    Background { id: String },
-    /// Foreground a shell session
-    Foreground { id: String },
-    /// Terminate a shell session
-    Kill { id: String },
 }
 
 #[derive(Subcommand)]
@@ -193,8 +161,28 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Listen { host, port } => {
-            tracing::info!("Starting CAP listener on {}:{}", host, port);
-            listener::server::start_listener(host, port, config, session_manager).await?;
+            println!("\n{} Starting shell listener on {}:{}", "🐚".to_string(), host.cyan(), port.to_string().cyan());
+            println!("{} Press {} to open control menu in interactive mode", "💡".to_string(), "F12".yellow());
+            println!("{} Use {} to connect from remote target\n", "📡".to_string(), format!("nc {} {}", host, port).bright_white());
+            
+            let manager = Arc::new(ShellSessionManager::new());
+            let listener = ShellListener::new(manager.clone());
+            
+            // Start listener in background
+            let listener_manager = manager.clone();
+            let listen_host = host.clone();
+            tokio::spawn(async move {
+                if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
+                    error!("Shell listener error: {}", e);
+                }
+            });
+            
+            // Give listener time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Start interactive terminal
+            let mut terminal = InteractiveTerminal::new(manager);
+            terminal.run().await?;
         }
         Commands::Modules => {
             handle_list_modules();
@@ -245,9 +233,6 @@ async fn main() -> Result<()> {
         }
         Commands::Init { name } => {
             handle_init_command(name).await?;
-        }
-        Commands::Shell { action } => {
-            handle_shell_action(action).await?;
         }
     }
 
@@ -819,66 +804,4 @@ async fn handle_generate_payload(
     Ok(())
 }
 
-async fn handle_shell_action(action: ShellAction) -> Result<()> {
-    match action {
-        ShellAction::Listen { host, port } => {
-            println!("\n{} Starting shell listener on {}:{}", "🐚".to_string(), host.cyan(), port.to_string().cyan());
-            println!("{} Press {} to open control menu in interactive mode", "💡".to_string(), "F12".yellow());
-            println!("{} Use {} to connect from remote target\n", "📡".to_string(), format!("nc {} {}", host, port).bright_white());
-            
-            let manager = Arc::new(ShellSessionManager::new());
-            let listener = ShellListener::new(manager.clone());
-            
-            // Start listener in background
-            let listener_manager = manager.clone();
-            let listen_host = host.clone();
-            tokio::spawn(async move {
-                if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
-                    error!("Shell listener error: {}", e);
-                }
-            });
-            
-            // Give listener time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            
-            // Start interactive terminal
-            let mut terminal = InteractiveTerminal::new(manager);
-            terminal.run().await?;
-        }
-        ShellAction::List => {
-            // This would connect to a running listener to get sessions
-            // For now, just inform the user
-            println!("\n{} To list active shell sessions, start the listener with:", "ℹ".to_string());
-            println!("  {}", "cap shell listen".bright_white());
-            println!("\n{} Then press {} inside the interactive terminal", "💡".to_string(), "F12".yellow());
-        }
-        ShellAction::Attach { id } => {
-            if let Some(session_id) = id {
-                println!("\n{} Attaching to shell session: {}", "→".blue(), session_id.yellow());
-                println!("{} Shell attachment requires an active listener", "ℹ".to_string());
-                println!("  Start listener: {}", "cap shell listen".bright_white());
-                println!("  Then use {} to manage sessions", "F12".yellow());
-            } else {
-                println!("\n{} Attaching to most recent shell session", "→".blue());
-                println!("{} Shell attachment requires an active listener", "ℹ".to_string());
-            }
-        }
-        ShellAction::Background { id } => {
-            println!("\n{} Backgrounding shell session: {}", "◐".yellow(), id.yellow());
-            println!("{} Session management requires an active listener", "ℹ".to_string());
-            println!("  Use {} inside the interactive terminal", "F12".yellow());
-        }
-        ShellAction::Foreground { id } => {
-            println!("\n{} Foregrounding shell session: {}", "●".green(), id.yellow());
-            println!("{} Session management requires an active listener", "ℹ".to_string());
-            println!("  Use {} inside the interactive terminal", "F12".yellow());
-        }
-        ShellAction::Kill { id } => {
-            println!("\n{} Terminating shell session: {}", "✗".red(), id.yellow());
-            println!("{} Session management requires an active listener", "ℹ".to_string());
-            println!("  Use {} inside the interactive terminal", "F12".yellow());
-        }
-    }
-    Ok(())
-}
 

