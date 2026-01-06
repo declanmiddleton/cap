@@ -8,7 +8,7 @@ port = 8443
 tls_enabled = false
 
 [scope]
-authorized_targets = []
+authorized_targets = ["192.168.1.1/32"]
 
 [audit]
 log_path = "logs/audit.jsonl"
