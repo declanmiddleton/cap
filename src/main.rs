@@ -207,10 +207,6 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Listen { host, port } => {
-            println!("\n{} Starting shell listener on {}:{}", "🐚".to_string(), host.cyan(), port.to_string().cyan());
-            println!("{} Press {} to open control menu in interactive mode", "💡".to_string(), "F12".yellow());
-            println!("{} Use {} to connect from remote target\n", "📡".to_string(), format!("nc {} {}", host, port).bright_white());
-            
             let manager = Arc::new(ShellSessionManager::new());
             let listener = ShellListener::new(manager.clone());
             
