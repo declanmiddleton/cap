@@ -1,0 +1,3 @@
+# This directory stores audit logs
+# Logs are excluded from git by default (see .gitignore)
+

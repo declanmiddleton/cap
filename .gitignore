@@ -1,0 +1,46 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and data
+logs/*.jsonl
+logs/*.log
+*.log
+
+# Reports
+reports/*.json
+reports/*.html
+reports/*.pdf
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific - keep structure but not content
+config/*.toml
+!config/default.toml
+
+# Keep wordlists structure
+wordlists/*.txt
+!wordlists/common.txt
+!wordlists/subdomains.txt
+
+# Screenshots - keep directory but track files manually
+!screenshots/*.png
+!screenshots/*.jpg
+!screenshots/README.md

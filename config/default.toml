@@ -1,0 +1,19 @@
+[general]
+name = "CAP Project"
+description = "Security assessment project"
+
+[server]
+host = "127.0.0.1"
+port = 8443
+tls_enabled = false
+
+[scope]
+authorized_targets = []
+
+[audit]
+log_path = "logs/audit.jsonl"
+retention_days = 90
+
+[modules]
+default_threads = 10
+timeout_seconds = 300

@@ -1,0 +1,69 @@
+# Common web paths for security testing
+# Use only on authorized systems
+
+# Admin panels
+admin
+administrator
+login
+signin
+auth
+dashboard
+panel
+
+# API endpoints
+api
+api/v1
+api/v2
+graphql
+swagger
+docs
+
+# Configuration
+config
+configuration
+settings
+.env
+.git
+.gitignore
+
+# Backups
+backup
+backups
+old
+temp
+tmp
+
+# Common files
+robots.txt
+sitemap.xml
+security.txt
+.well-known
+favicon.ico
+
+# Development
+dev
+test
+staging
+beta
+debug
+
+# Data
+uploads
+files
+assets
+images
+static
+public
+
+# Database
+phpmyadmin
+adminer
+database
+db
+
+# Monitoring
+metrics
+health
+status
+ping
+

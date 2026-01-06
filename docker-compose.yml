@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  cap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cap-server
+    image: cap:latest
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./wordlists:/app/wordlists:ro
+      - ./reports:/app/reports
+    command: listen --host 0.0.0.0 --port 8443
+    restart: unless-stopped
+    networks:
+      - cap-network
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  cap-network:
+    driver: bridge
+
