@@ -1,5 +1,6 @@
 use colored::Colorize;
 
+/// Display full banner with text logo (for main command)
 pub fn display_banner() {
     let banner = r#"
  ______     ______     ______  
@@ -31,5 +32,20 @@ pub fn display_banner() {
         "  {} Ensure proper authorization before any assessment\n",
         "📋".to_string()
     );
+}
+
+/// Display just the cap/hat logo (for sub-commands)
+pub fn display_cap_logo() {
+    let cap = r#"
+      .::///:.
+    -+########+-
+   =############=
+  +##############*
+  ################
+  "#;
+
+    // Use TrueColor for vibrant orange (RGB: 255, 140, 0)
+    let cap_orange = cap.truecolor(255, 140, 0).to_string();
+    println!("{}", cap_orange);
 }
 

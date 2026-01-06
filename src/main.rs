@@ -9,7 +9,7 @@ mod core;
 mod modules;
 mod shell;
 
-use cli::banner::display_banner;
+use cli::banner::{display_banner, display_cap_logo};
 use core::{config::Config, session::SessionManager};
 use shell::{ShellListener, ShellSessionManager, InteractiveTerminal};
 use std::sync::Arc;
@@ -135,9 +135,16 @@ enum ScopeAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Always display banner first, before any processing
-    // This ensures users see the banner even with --help
-    display_banner();
+    // Show full banner if help is requested or no command given
+    let args: Vec<String> = std::env::args().collect();
+    let show_full_banner = args.len() == 1 
+        || args.contains(&"--help".to_string()) 
+        || args.contains(&"-h".to_string())
+        || args.contains(&"help".to_string());
+    
+    if show_full_banner {
+        display_banner();
+    }
 
     // Parse CLI arguments
     let cli = Cli::parse();
@@ -189,12 +196,15 @@ async fn main() -> Result<()> {
             terminal.run().await?;
         }
         Commands::Modules => {
+            display_cap_logo();
             handle_list_modules();
         }
         Commands::Wordlists { search } => {
+            display_cap_logo();
             handle_list_wordlists(search);
         }
         Commands::Session { action } => {
+            display_cap_logo();
             handle_session_action(action, session_manager).await?;
         }
         Commands::Module {
@@ -206,6 +216,7 @@ async fn main() -> Result<()> {
             status_codes,
             exclude_codes,
         } => {
+            display_cap_logo();
             handle_module_execution(
                 name,
                 target,
@@ -224,18 +235,22 @@ async fn main() -> Result<()> {
             target,
             output,
         } => {
+            display_cap_logo();
             handle_generate_payload(module, target, output, &config).await?;
         }
         Commands::Scope { action } => {
+            display_cap_logo();
             handle_scope_action(action, &config).await?;
         }
         Commands::Audit {
             session_id,
             export,
         } => {
+            display_cap_logo();
             handle_audit_command(session_id, export, &config).await?;
         }
         Commands::Init { name } => {
+            display_cap_logo();
             handle_init_command(name).await?;
         }
     }
