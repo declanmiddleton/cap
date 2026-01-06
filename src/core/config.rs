@@ -56,6 +56,20 @@ struct ScopeConfig {
 }
 
 impl Config {
+    /// Load config from file, or use defaults if file doesn't exist
+    pub fn load_or_default<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        
+        // If config file doesn't exist, use defaults
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        
+        // Try to load the config file
+        Self::load(path)
+    }
+
+    /// Load config from file (fails if file doesn't exist)
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let contents = fs::read_to_string(path)
@@ -77,6 +91,12 @@ impl Config {
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+        }
 
         let config_file = ConfigFile {
             general: self.general.clone(),

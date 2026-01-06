@@ -152,9 +152,13 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Load configuration
-    let config = Config::load("config/default.toml")?;
-    tracing::info!("Configuration loaded from: config/default.toml");
+    // Load configuration (use defaults if file doesn't exist)
+    let config = Config::load_or_default("config/default.toml")?;
+    if std::path::Path::new("config/default.toml").exists() {
+        tracing::info!("Configuration loaded from: config/default.toml");
+    } else {
+        tracing::info!("Using default configuration");
+    }
 
     // Initialize session manager
     let session_manager = SessionManager::new(config.clone());
