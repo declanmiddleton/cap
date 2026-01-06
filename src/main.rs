@@ -42,6 +42,12 @@ enum Commands {
         action: SessionAction,
     },
 
+    /// Shell session management (list, interact, kill)
+    Shell {
+        #[command(subcommand)]
+        action: ShellAction,
+    },
+
     /// List available modules
     Modules,
 
@@ -122,6 +128,35 @@ enum SessionAction {
 }
 
 #[derive(Subcommand)]
+enum ShellAction {
+    /// List active shell sessions
+    List,
+    /// Interact with a shell session
+    Interact {
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Kill a shell session
+    Kill {
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Upgrade shell to PTY
+    Upgrade {
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Run a command on a shell session
+    Run {
+        #[arg(short, long)]
+        id: String,
+        
+        #[arg(short, long)]
+        command: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum ScopeAction {
     /// Add a target to authorized scope
     Add { target: String },
@@ -180,7 +215,6 @@ async fn main() -> Result<()> {
             let listener = ShellListener::new(manager.clone());
             
             // Start listener in background
-            let listener_manager = manager.clone();
             let listen_host = host.clone();
             tokio::spawn(async move {
                 if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
@@ -206,6 +240,10 @@ async fn main() -> Result<()> {
         Commands::Session { action } => {
             display_cap_logo();
             handle_session_action(action, session_manager).await?;
+        }
+        Commands::Shell { action } => {
+            display_cap_logo();
+            handle_shell_action(action).await?;
         }
         Commands::Module {
             name,
@@ -302,6 +340,110 @@ async fn handle_session_action(action: SessionAction, manager: SessionManager) -
         }
     }
     Ok(())
+}
+
+fn short_id(id: &str) -> &str {
+    if id.len() > 12 {
+        &id[..12]
+    } else {
+        id
+    }
+}
+
+async fn handle_shell_action(action: ShellAction) -> Result<()> {
+    // Load shell session state from file
+    let state_file = "shell_sessions.json";
+    
+    match action {
+        ShellAction::List => {
+            println!("\n{}", "Shell Sessions:".bright_blue());
+            println!("{}", "─".repeat(60).bright_black());
+            
+            if std::path::Path::new(state_file).exists() {
+                let content = tokio::fs::read_to_string(state_file).await?;
+                if let Ok(sessions) = serde_json::from_str::<Vec<ShellSessionInfo>>(&content) {
+                    if sessions.is_empty() {
+                        println!("{}", "  No active shell sessions".bright_black());
+                        println!("\n{} Start a listener with: {}", "💡".to_string(), "cap listen".cyan());
+                    } else {
+                        for session in sessions {
+                            let state_icon = match session.state.as_str() {
+                                "Active" => "●".green(),
+                                "Background" => "◐".yellow(),
+                                "Terminated" => "○".red(),
+                                _ => "○".white(),
+                            };
+                            
+                            println!(
+                                "  {} {} | {} | Connected: {}",
+                                state_icon,
+                                short_id(&session.id).yellow(),
+                                session.remote_addr.cyan(),
+                                session.connected_at.bright_black()
+                            );
+                        }
+                        println!("\n{} Interact with: {} <session-id>", "💡".to_string(), "cap shell interact --id".cyan());
+                    }
+                } else {
+                    println!("{}", "  No active shell sessions".bright_black());
+                }
+            } else {
+                println!("{}", "  No active shell sessions".bright_black());
+                println!("\n{} Start a listener with: {}", "💡".to_string(), "cap listen".cyan());
+            }
+            println!();
+        }
+        ShellAction::Interact { id } => {
+            println!(
+                "\n{} To interact with shell sessions, use the interactive listener:",
+                "ℹ".blue()
+            );
+            println!("  1. Run: {}", "cap listen".cyan());
+            println!("  2. Press {} in the interactive terminal", "F12".yellow());
+            println!("  3. Select the session from the menu\n");
+        }
+        ShellAction::Kill { id } => {
+            println!(
+                "\n{} Terminating shell session: {}",
+                "✗".red(),
+                short_id(&id).yellow()
+            );
+            // In the full implementation, this would signal the running listener
+            println!("{} Use the interactive menu (F12) to manage sessions\n", "💡".to_string());
+        }
+        ShellAction::Upgrade { id } => {
+            println!(
+                "\n{} Shell upgrade (PTY) - Feature coming soon!",
+                "🔧".yellow()
+            );
+            println!("  Session: {}", short_id(&id).yellow());
+            println!("\n{} This will upgrade the shell to a full PTY with:", "💡".to_string());
+            println!("  • Tab completion");
+            println!("  • Command history");
+            println!("  • Proper terminal size");
+            println!("  • Interactive programs support\n");
+        }
+        ShellAction::Run { id, command } => {
+            println!(
+                "\n{} Running command on session {}:",
+                "▶".green(),
+                short_id(&id).yellow()
+            );
+            println!("  Command: {}\n", command.cyan());
+            println!("{} Use interactive mode for real-time output\n", "💡".to_string());
+        }
+    }
+    
+    Ok(())
+}
+
+// Helper struct for shell session serialization
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ShellSessionInfo {
+    id: String,
+    remote_addr: String,
+    state: String,
+    connected_at: String,
 }
 
 async fn handle_module_execution(

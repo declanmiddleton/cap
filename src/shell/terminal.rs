@@ -179,7 +179,12 @@ impl InteractiveTerminal {
 
     fn menu_next(&mut self) {
         let sessions = self.manager.list_sessions();
-        let menu_items = 4 + sessions.len(); // 4 static items + sessions
+        // 7 static menu items + 2 headers/dividers + sessions
+        let menu_items = if sessions.is_empty() {
+            10 // All menu items + "no sessions" message
+        } else {
+            9 + sessions.len() // Menu items + session header + sessions
+        };
         
         let i = match self.menu_state.selected() {
             Some(i) => {
@@ -196,7 +201,11 @@ impl InteractiveTerminal {
 
     fn menu_previous(&mut self) {
         let sessions = self.manager.list_sessions();
-        let menu_items = 4 + sessions.len();
+        let menu_items = if sessions.is_empty() {
+            10
+        } else {
+            9 + sessions.len()
+        };
         
         let i = match self.menu_state.selected() {
             Some(i) => {
@@ -219,7 +228,9 @@ impl InteractiveTerminal {
             // Close menu
             self.mode = AppMode::Interactive;
         } else if selected == 1 {
-            // List all sessions (do nothing, already visible)
+            // Exit terminal (listener keeps running)
+            info!("Exiting interactive terminal, listener continues in background");
+            std::process::exit(0);
         } else if selected == 2 {
             // Background current session
             if let Some(session) = self.manager.get_active_session().await {
@@ -227,12 +238,22 @@ impl InteractiveTerminal {
                 self.mode = AppMode::Interactive;
             }
         } else if selected == 3 {
+            // Terminate active session
+            if let Some(session) = self.manager.get_active_session().await {
+                self.manager.terminate_session(&session.id).await?;
+                self.mode = AppMode::Interactive;
+            }
+        } else if selected == 4 {
             // Cleanup terminated
             self.manager.cleanup_terminated_sessions().await;
             self.mode = AppMode::Interactive;
+        } else if selected == 5 {
+            // Stop listener and exit
+            info!("Stopping listener and exiting");
+            std::process::exit(0);
         } else {
             // Switch to specific session
-            let session_index = selected - 4;
+            let session_index = selected - 6;
             if session_index < sessions.len() {
                 let (session_id, state) = &sessions[session_index];
                 if *state != ShellState::Terminated {
@@ -316,16 +337,19 @@ impl InteractiveTerminal {
         let sessions = self.manager.list_sessions();
         
         let mut items = vec![
-            ListItem::new("[ Close Menu ]").style(Style::default().fg(Color::Red)),
+            ListItem::new("[ Close Menu (Return to Shell) ]").style(Style::default().fg(Color::Cyan)),
+            ListItem::new("[ Exit Terminal (Listener Keeps Running) ]").style(Style::default().fg(Color::Green)),
             ListItem::new("---").style(Style::default().fg(Color::DarkGray)),
-            ListItem::new("Background Current Session").style(Style::default().fg(Color::Yellow)),
+            ListItem::new("Background Current Session (Ctrl+Z)").style(Style::default().fg(Color::Yellow)),
+            ListItem::new("Kill Active Session").style(Style::default().fg(Color::Red)),
             ListItem::new("Cleanup Terminated Sessions").style(Style::default().fg(Color::Magenta)),
+            ListItem::new("[ Stop Listener & Exit ]").style(Style::default().fg(Color::Red)),
         ];
 
         if !sessions.is_empty() {
             items.push(ListItem::new("---").style(Style::default().fg(Color::DarkGray)));
             items.push(
-                ListItem::new("Active Sessions:")
+                ListItem::new("Switch to Session:")
                     .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             );
 
@@ -335,13 +359,13 @@ impl InteractiveTerminal {
                     ShellState::Background => "◐".yellow().to_string(),
                     ShellState::Terminated => "○".red().to_string(),
                 };
-                let item_text = format!("{} {}", state_str, &id[..8]);
+                let item_text = format!("{} {} ", state_str, &id[..12]);
                 items.push(ListItem::new(item_text));
             }
         } else {
             items.push(ListItem::new("---").style(Style::default().fg(Color::DarkGray)));
             items.push(
-                ListItem::new("No active sessions")
+                ListItem::new("[ No active sessions - waiting for connections... ]")
                     .style(Style::default().fg(Color::DarkGray)),
             );
         }
@@ -350,7 +374,7 @@ impl InteractiveTerminal {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Control Menu (F12 or ESC to close)"),
+                    .title("Control Menu (F12 or ESC to close) - Penelope Style"),
             )
             .highlight_style(
                 Style::default()

@@ -231,7 +231,43 @@ impl ShellSessionManager {
             info!("Set session {} as active", session_id);
         }
 
+        // Save sessions to file for CLI access
+        self.save_sessions_to_file().await;
+
         Ok(session_id)
+    }
+    
+    async fn save_sessions_to_file(&self) {
+        use serde::{Serialize, Deserialize};
+        
+        #[derive(Serialize, Deserialize)]
+        struct SessionInfo {
+            id: String,
+            remote_addr: String,
+            state: String,
+            connected_at: String,
+        }
+        
+        let mut sessions_info = Vec::new();
+        for entry in self.sessions.iter() {
+            let state = entry.value().get_state().await;
+            let state_str = match state {
+                ShellState::Active => "Active",
+                ShellState::Background => "Background",
+                ShellState::Terminated => "Terminated",
+            };
+            
+            sessions_info.push(SessionInfo {
+                id: entry.key().clone(),
+                remote_addr: entry.value().metadata.remote_addr.clone(),
+                state: state_str.to_string(),
+                connected_at: entry.value().metadata.connected_at.to_rfc3339(),
+            });
+        }
+        
+        if let Ok(json) = serde_json::to_string_pretty(&sessions_info) {
+            let _ = tokio::fs::write("shell_sessions.json", json).await;
+        }
     }
 
     pub fn get_session(&self, id: &str) -> Option<Arc<ShellSession>> {
@@ -306,6 +342,10 @@ impl ShellSessionManager {
             }
             
             info!("Terminated session {}", id);
+            
+            // Update saved sessions
+            self.save_sessions_to_file().await;
+            
             Ok(())
         } else {
             anyhow::bail!("Session not found: {}", id)
@@ -322,9 +362,16 @@ impl ShellSessionManager {
             }
         }
         
+        let has_removed = !to_remove.is_empty();
+        
         for id in to_remove {
             self.sessions.remove(&id);
             warn!("Cleaned up terminated session: {}", id);
+        }
+        
+        // Update saved sessions
+        if has_removed {
+            self.save_sessions_to_file().await;
         }
     }
 
