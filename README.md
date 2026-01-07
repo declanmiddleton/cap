@@ -52,7 +52,7 @@ If Kerberos-authenticated functionality is required, the Kerberos client package
 Once Rust is installed, CAP can be built from source by cloning the repository and compiling it with Cargo:
 
 ```bash
-git clone https://github.com/yourusername/cap.git
+git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
@@ -100,7 +100,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 After installing Rust, CAP can be built normally using Cargo:
 
 ```bash
-git clone https://github.com/yourusername/cap.git
+git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
@@ -112,7 +112,7 @@ On Windows, Rust can be installed using the official Rust installer from [https:
 Once Rust and Cargo are installed, CAP can be built from a standard command prompt or PowerShell:
 
 ```powershell
-git clone https://github.com/yourusername/cap.git
+git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
