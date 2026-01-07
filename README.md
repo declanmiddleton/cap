@@ -19,10 +19,11 @@ CAP is:
 - A controlled shell listener
 - A reconnaissance and enumeration orchestrator
 - A research and training framework
-- An exploitation toolkit
+- An toolkit
   
 CAP is not:
 - A malware framework
+- A Black Hat Hacking Framework
   
 Typical scenarios include:
 - Authorized penetration tests
