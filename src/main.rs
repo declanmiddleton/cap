@@ -9,14 +9,14 @@ mod core;
 mod modules;
 mod shell;
 
-use cli::banner::{display_banner, display_cap_logo};
+use cli::banner::display_banner;
 use core::{config::Config, session::SessionManager};
 use shell::{ShellListener, ShellSessionManager, InteractiveTerminal};
 use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "cap")]
-#[command(about = "CAP - Comprehensive Assessment Platform\nA research-oriented security orchestration framework", long_about = None)]
+#[command(about = "Security assessment tool for authorized penetration testing", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -231,19 +231,15 @@ async fn main() -> Result<()> {
             terminal.run().await?;
         }
         Commands::Modules => {
-            display_cap_logo();
             handle_list_modules();
         }
         Commands::Wordlists { search } => {
-            display_cap_logo();
             handle_list_wordlists(search);
         }
         Commands::Session { action } => {
-            display_cap_logo();
             handle_session_action(action, session_manager).await?;
         }
         Commands::Shell { action } => {
-            display_cap_logo();
             handle_shell_action(action).await?;
         }
         Commands::Module {
@@ -255,7 +251,6 @@ async fn main() -> Result<()> {
             status_codes,
             exclude_codes,
         } => {
-            display_cap_logo();
             handle_module_execution(
                 name,
                 target,
@@ -274,22 +269,18 @@ async fn main() -> Result<()> {
             target,
             output,
         } => {
-            display_cap_logo();
             handle_generate_payload(module, target, output, &config).await?;
         }
         Commands::Scope { action } => {
-            display_cap_logo();
             handle_scope_action(action, &config).await?;
         }
         Commands::Audit {
             session_id,
             export,
         } => {
-            display_cap_logo();
             handle_audit_command(session_id, export, &config).await?;
         }
         Commands::Init { name } => {
-            display_cap_logo();
             handle_init_command(name).await?;
         }
     }
@@ -357,51 +348,49 @@ async fn handle_shell_action(action: ShellAction) -> Result<()> {
     
     match action {
         ShellAction::List => {
-            println!("\n{}", "Shell Sessions:".bright_blue());
-            println!("{}", "─".repeat(60).bright_black());
+            println!();
+            println!("{}", "Shell Sessions:".bright_cyan());
             
             if std::path::Path::new(state_file).exists() {
                 let content = tokio::fs::read_to_string(state_file).await?;
                 if let Ok(sessions) = serde_json::from_str::<Vec<ShellSessionInfo>>(&content) {
                     if sessions.is_empty() {
-                        println!("{}", "  No active shell sessions".bright_black());
-                        println!("\n{} Start a listener with: {}", "💡".to_string(), "cap listen".cyan());
+                        println!("{}   (none)", "›".bright_black());
+                        println!();
+                        println!("{} Start a listener with: {}", "[*]".bright_black(), "cap listen".cyan());
                     } else {
                         for session in sessions {
-                            let state_icon = match session.state.as_str() {
-                                "Active" => "●".green(),
-                                "Background" => "◐".yellow(),
-                                "Terminated" => "○".red(),
-                                _ => "○".white(),
+                            let state_str = match session.state.as_str() {
+                                "Active" => "ACTIVE".green(),
+                                "Background" => "BACKGROUND".yellow(),
+                                "Terminated" => "TERMINATED".red(),
+                                _ => "UNKNOWN".white(),
                             };
                             
                             println!(
-                                "  {} {} | {} | Connected: {}",
-                                state_icon,
-                                short_id(&session.id).yellow(),
+                                "{}   {} | {} | {}",
+                                "›".bright_black(),
+                                short_id(&session.id).bright_white(),
                                 session.remote_addr.cyan(),
-                                session.connected_at.bright_black()
+                                state_str
                             );
                         }
-                        println!("\n{} Interact with: {} <session-id>", "💡".to_string(), "cap shell interact --id".cyan());
                     }
                 } else {
-                    println!("{}", "  No active shell sessions".bright_black());
+                    println!("{}   (none)", "›".bright_black());
                 }
             } else {
-                println!("{}", "  No active shell sessions".bright_black());
-                println!("\n{} Start a listener with: {}", "💡".to_string(), "cap listen".cyan());
+                println!("{}   (none)", "›".bright_black());
+                println!();
+                println!("{} Start a listener with: {}", "[*]".bright_black(), "cap listen".cyan());
             }
             println!();
         }
         ShellAction::Interact { id } => {
-            println!(
-                "\n{} To interact with shell sessions, use the interactive listener:",
-                "ℹ".blue()
-            );
-            println!("  1. Run: {}", "cap listen".cyan());
-            println!("  2. Press {} in the interactive terminal", "F12".yellow());
-            println!("  3. Select the session from the menu\n");
+            println!();
+            println!("{} To interact with shell sessions:", "[*]".bright_cyan());
+            println!("{}   Run: {}", "›".bright_black(), "cap listen".cyan());
+            println!();
         }
         ShellAction::Kill { id } => {
             println!(

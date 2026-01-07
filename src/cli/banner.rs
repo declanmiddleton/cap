@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-/// Display full banner with text logo (for main command)
+/// Display CAP banner (for help/main command only)
 pub fn display_banner() {
     let banner = r#"
  ______     ______     ______  
@@ -11,41 +11,11 @@ pub fn display_banner() {
                                
     "#;
 
-    // Use TrueColor for vibrant orange (RGB: 255, 140, 0)
-    let banner_orange = banner.truecolor(255, 140, 0).to_string();
-    println!("{}", banner_orange);
-
-    let subtitle = "  Comprehensive Assessment Platform";
-    let version = "v0.1.0";
-    let tagline = "Research-Oriented Security Orchestration Framework";
-
-    println!("{}", subtitle.bright_yellow());
-    println!(
-        "  {} | {}\n",
-        version.bright_black(),
-        tagline.bright_blue()
-    );
-
-    let warning = "  ⚠  AUTHORIZED USE ONLY - For research, training, and approved testing";
-    println!("{}", warning.yellow());
-    println!(
-        "  {} Ensure proper authorization before any assessment\n",
-        "📋".to_string()
-    );
-}
-
-/// Display just the cap/hat logo (for sub-commands)
-pub fn display_cap_logo() {
-    let cap = r#"
-      .::///:.
-    -+########+-
-   =############=
-  +##############*
-  ################
-  "#;
-
-    // Use TrueColor for vibrant orange (RGB: 255, 140, 0)
-    let cap_orange = cap.truecolor(255, 140, 0).to_string();
-    println!("{}", cap_orange);
+    println!("{}", banner.truecolor(255, 140, 0));
+    println!("{}", "  CAP – Comprehensive Assessment Platform".bright_yellow());
+    println!("{}", "  Security assessment tool for authorized penetration testing".bright_black());
+    println!();
+    println!("{}", "  Authorized use only. Ensure you have permission before testing any target.".yellow());
+    println!();
 }
 

@@ -306,3 +306,4 @@ To enhance the shell handler:
 
 **Remember**: Only use CAP Shell Handler on systems you own or have explicit permission to test. Unauthorized access is illegal.
 
+
