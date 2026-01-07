@@ -8,6 +8,7 @@ mod cli;
 mod core;
 mod modules;
 mod shell;
+mod web;
 
 use cli::banner::display_banner;
 use core::{config::Config, session::SessionManager};
@@ -92,6 +93,12 @@ enum Commands {
         #[arg(short, long)]
         output: Option<String>,
     },
+    
+    /// Web application security testing (SSTI, SQLi, Fingerprinting)
+    Web {
+        #[command(subcommand)]
+        action: WebAction,
+    },
 
     /// Manage scope and authorized targets
     Scope {
@@ -153,6 +160,45 @@ enum ShellAction {
         
         #[arg(short, long)]
         command: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebAction {
+    /// List all available web modules
+    List,
+    
+    /// Show detailed module information
+    Info {
+        #[arg(short, long)]
+        module: String,
+    },
+    
+    /// Execute a web module
+    Run {
+        #[arg(short, long)]
+        module: String,
+        
+        #[arg(short, long)]
+        request: Option<String>,
+        
+        #[arg(short, long)]
+        injection_point: Option<String>,
+        
+        #[arg(short, long)]
+        url: Option<String>,
+        
+        #[arg(long)]
+        lhost: Option<String>,
+        
+        #[arg(long)]
+        lport: Option<String>,
+        
+        #[arg(long)]
+        dry_run: bool,
+        
+        #[arg(long)]
+        confirm_each: bool,
     },
 }
 
@@ -270,6 +316,9 @@ async fn main() -> Result<()> {
             output,
         } => {
             handle_generate_payload(module, target, output, &config).await?;
+        }
+        Commands::Web { action } => {
+            handle_web_action(action).await?;
         }
         Commands::Scope { action } => {
             handle_scope_action(action, &config).await?;
@@ -434,6 +483,155 @@ struct ShellSessionInfo {
     remote_addr: String,
     state: String,
     connected_at: String,
+}
+
+async fn handle_web_action(action: WebAction) -> Result<()> {
+    let registry = web::ModuleRegistry::new();
+    
+    match action {
+        WebAction::List => {
+            registry.display_modules();
+        }
+        
+        WebAction::Info { module } => {
+            if let Some(web_module) = registry.get_module(&module) {
+                web_module.display_info();
+            } else {
+                println!("\n{} Module not found: {}", "[!]".red(), module.red());
+                println!("{} Use {} to see available modules\n", "[*]".bright_black(), "cap web list".cyan());
+            }
+        }
+        
+        WebAction::Run {
+            module,
+            request,
+            injection_point,
+            url,
+            lhost,
+            lport,
+            dry_run,
+            confirm_each,
+        } => {
+            if let Some(web_module) = registry.get_module(&module) {
+                let operator = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+                let mut context = web::ModuleContext::new(operator);
+                
+                // Load request file if provided
+                if let Some(req_file) = request {
+                    println!("{} Loading HTTP request from: {}", "[*]".bright_cyan(), req_file.bright_white());
+                    
+                    match web::request::HttpRequest::from_file(&req_file).await {
+                        Ok(req) => {
+                            println!("{} Request loaded successfully", "[+]".green());
+                            println!("{}   Method: {} {}", "›".bright_black(), req.method, req.path);
+                            
+                            if let Some(host) = req.headers.get("Host") {
+                                println!("{}   Host: {}", "›".bright_black(), host);
+                            }
+                            
+                            // Show injection points
+                            let points = req.injection_points();
+                            println!("\n{} Available injection points:", "[*]".bright_cyan());
+                            for (i, point) in points.iter().enumerate() {
+                                println!("{}   [{}] {}", "›".bright_black(), i + 1, point.display());
+                            }
+                            println!();
+                            
+                            context.request = Some(req);
+                        }
+                        Err(e) => {
+                            println!("{} Failed to load request: {}", "[!]".red(), e);
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                // Set injection point if provided
+                if let Some(point_name) = injection_point {
+                    if let Some(ref req) = context.request {
+                        // Try to find matching injection point
+                        let points = req.injection_points();
+                        let matching_point = points.iter().find(|p| {
+                            match p {
+                                web::request::InjectionPoint::QueryParam(n) |
+                                web::request::InjectionPoint::BodyParam(n) |
+                                web::request::InjectionPoint::Header(n) |
+                                web::request::InjectionPoint::Cookie(n) => n == &point_name,
+                            }
+                        });
+                        
+                        if let Some(point) = matching_point {
+                            println!("{} Injection point set: {}", "[+]".green(), point.display());
+                            context.injection_point = Some(point.clone());
+                        } else {
+                            println!("{} Injection point '{}' not found in request", "[!]".yellow(), point_name);
+                        }
+                    }
+                }
+                
+                // Set options
+                if let Some(u) = url {
+                    context.set_option("URL".to_string(), u);
+                }
+                
+                if let Some(h) = lhost {
+                    context.set_option("LHOST".to_string(), h);
+                }
+                
+                if let Some(p) = lport {
+                    context.set_option("LPORT".to_string(), p);
+                }
+                
+                if dry_run {
+                    context.set_option("DRY_RUN".to_string(), "true".to_string());
+                    println!("{} DRY RUN MODE - No requests will be sent", "[*]".yellow());
+                }
+                
+                if confirm_each {
+                    context.set_option("CONFIRM_EACH".to_string(), "true".to_string());
+                }
+                
+                // Execute module
+                println!("{} Executing module: {}", "[*]".bright_cyan(), module.bright_white());
+                println!();
+                
+                match web_module.execute(&context).await {
+                    Ok(result) => {
+                        println!("\n{}", "═".repeat(64).bright_black());
+                        println!("{}", "EXECUTION RESULTS".bright_cyan().bold());
+                        println!("{}", "─".repeat(64).bright_black());
+                        
+                        if result.success {
+                            println!("{} Module executed successfully", "[+]".green());
+                        } else {
+                            println!("{} Module completed with no significant findings", "[*]".yellow());
+                        }
+                        
+                        println!();
+                        println!("{}:", "Findings".bright_yellow());
+                        for finding in &result.findings {
+                            println!("{}   {}", "›".bright_black(), finding);
+                        }
+                        
+                        println!();
+                        println!("Timestamp: {}", result.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string().bright_black());
+                        println!("{}", "═".repeat(64).bright_black());
+                        println!();
+                        
+                        // TODO: Log to audit chain
+                    }
+                    Err(e) => {
+                        println!("{} Module execution failed: {}", "[!]".red(), e);
+                    }
+                }
+            } else {
+                println!("\n{} Module not found: {}", "[!]".red(), module.red());
+                println!("{} Use {} to see available modules\n", "[*]".bright_black(), "cap web list".cyan());
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 async fn handle_module_execution(

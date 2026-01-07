@@ -1,0 +1,8 @@
+POST /search?category=books&sort=price HTTP/1.1
+Host: vulnerable-app.local:8080
+User-Agent: Mozilla/5.0
+Content-Type: application/x-www-form-urlencoded
+Cookie: session=abc123; user_pref=dark_mode
+X-Custom-Header: test
+
+query=test&filter=all&template={{user_input}}

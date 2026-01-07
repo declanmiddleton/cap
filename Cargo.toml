@@ -34,6 +34,7 @@ whoami = "1.4"
 crossterm = "0.28"
 ratatui = "0.29"
 bytes = "1.10"
+urlencoding = "2.1"
 
 [dev-dependencies]
 mockito = "1.2"
