@@ -78,6 +78,10 @@ impl WebModule for BooleanSQLiModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection#authentication-bypass".to_string(),
                 "https://portswigger.net/web-security/sql-injection/blind".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/sqli/boolean --request ./requests/login.req --injection-point username".to_string(),
+                "cap web run --module web/sqli/boolean --request ./requests/api.req --injection-point id --dry-run".to_string(),
+            ],
         }
     }
     

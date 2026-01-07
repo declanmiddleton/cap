@@ -78,6 +78,10 @@ impl WebModule for ErrorSQLiModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection#error-based".to_string(),
                 "https://portswigger.net/web-security/sql-injection/union-attacks".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/sqli/error --request ./requests/login.req --injection-point username".to_string(),
+                "cap web run --module web/sqli/error --request ./requests/search.req --injection-point query --confirm-each".to_string(),
+            ],
         }
     }
     

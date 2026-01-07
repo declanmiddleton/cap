@@ -45,6 +45,10 @@ impl WebModule for SSTIDetectorModule {
                 "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection".to_string(),
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/ssti/detector --request ./requests/search.req --injection-point query".to_string(),
+                "cap web run --module web/ssti/detector --request ./requests/search.req --injection-point query --dry-run".to_string(),
+            ],
         }
     }
     

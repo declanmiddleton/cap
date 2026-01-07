@@ -244,6 +244,10 @@ impl WebModule for TechFingerprintModule {
             references: vec![
                 "https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/01-Information_Gathering/08-Fingerprint_Web_Application_Framework".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/fingerprint/tech --url https://target-app.com".to_string(),
+                "cap web run --module web/fingerprint/tech --url http://192.168.1.100:8080".to_string(),
+            ],
         }
     }
     

@@ -68,6 +68,10 @@ impl WebModule for TimeSQLiModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection#time-based".to_string(),
                 "https://portswigger.net/web-security/sql-injection/blind#exploiting-blind-sql-injection-by-triggering-time-delays".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/sqli/time --request ./requests/api.req --injection-point id".to_string(),
+                "cap web run --module web/sqli/time --request ./requests/search.req --injection-point query --dry-run".to_string(),
+            ],
         }
     }
     

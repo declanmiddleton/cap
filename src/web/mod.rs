@@ -20,6 +20,7 @@ pub struct ModuleInfo {
     pub description: String,
     pub author: String,
     pub references: Vec<String>,
+    pub examples: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,28 +68,41 @@ pub trait WebModule: Send + Sync {
     fn display_info(&self) {
         let info = self.info();
         println!();
-        println!("{}", format!("Module: {}", info.name).bright_cyan());
+        println!("{}", format!("Module: {}", info.name).bright_cyan().bold());
         println!("{}", format!("ID: {}", info.id).bright_black());
         println!();
-        println!("Description:");
+        println!("{}:", "Description".bright_yellow());
         println!("  {}", info.description);
         println!();
-        println!("Category: {}", info.category.bright_yellow());
-        println!("Author: {}", info.author.bright_black());
+        println!("{}: {}", "Category".bright_yellow(), info.category);
+        println!("{}: {}", "Author".bright_yellow(), info.author.bright_black());
         
-        if !info.references.is_empty() {
+        println!();
+        println!("{}:", "Required Options".bright_yellow());
+        for opt in self.required_options() {
+            println!("  {} {}", "›".bright_black(), opt);
+        }
+        
+        if !info.examples.is_empty() {
             println!();
-            println!("References:");
-            for ref_link in &info.references {
-                println!("  {}", ref_link.bright_blue());
+            println!("{}:", "Example Usage".bright_green().bold());
+            for (i, example) in info.examples.iter().enumerate() {
+                if info.examples.len() > 1 {
+                    println!("\n  {}. {}", i + 1, "Example:".bright_white());
+                }
+                println!("  {}", "$".bright_black());
+                println!("  {}", example.cyan());
             }
         }
         
-        println!();
-        println!("Required Options:");
-        for opt in self.required_options() {
-            println!("  {} {}", "›".bright_black(), opt.bright_white());
+        if !info.references.is_empty() {
+            println!();
+            println!("{}:", "References".bright_yellow());
+            for ref_link in &info.references {
+                println!("  {} {}", "›".bright_black(), ref_link.bright_blue());
+            }
         }
+        
         println!();
     }
 }

