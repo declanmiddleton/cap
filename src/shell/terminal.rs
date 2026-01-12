@@ -13,9 +13,8 @@ use std::time::Duration;
 use super::session::ShellSessionManager;
 use super::menu::MainMenu;
 
-// Modern color scheme
-const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };    // #2596be
-const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };   // #5621d5
+const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };
+const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };
 const SUCCESS_COLOR: Color = Color::Rgb { r: 80, g: 200, b: 120 };
 const WARNING_COLOR: Color = Color::Rgb { r: 255, g: 180, b: 80 };
 const MUTED_COLOR: Color = Color::Rgb { r: 120, g: 120, b: 130 };
@@ -25,80 +24,141 @@ pub enum InteractionResult {
     SessionEnded,  // Session terminated
 }
 
+#[derive(PartialEq, Eq)]
+enum TerminalState {
+    Listening,      // Waiting for connections
+    InMenu,         // Menu is displayed
+    InShell,        // Interacting with shell
+}
+
 pub struct InteractiveTerminal {
     manager: Arc<ShellSessionManager>,
+    state: TerminalState,
 }
 
 impl InteractiveTerminal {
     pub fn new(manager: Arc<ShellSessionManager>) -> Self {
-        Self { manager }
+        Self { 
+            manager,
+            state: TerminalState::Listening,
+        }
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        // Show welcome banner (no raw mode yet)
+        // Initial state: listening
         self.show_welcome_banner()?;
+        self.state = TerminalState::Listening;
         
-        // Main loop: wait for session or show menu
         loop {
-            // Wait for a session to become active OR show menu if we have backgrounded sessions
-            let session = loop {
-                // Check if we have any backgrounded sessions - if so, show menu
-                if self.manager.session_count() > 0 {
-                    let active = self.manager.get_active_session().await;
-                    if active.is_none() {
-                        // We have sessions but none active - show menu
-                        let mut menu = MainMenu::new(self.manager.clone());
-                        match menu.run().await? {
-                            Some(session_id) => {
-                                // User selected a session - set it as active
-                                let _ = self.manager.set_active_session(&session_id).await;
-                                // Continue to wait for it to be active
+            match self.state {
+                TerminalState::Listening => {
+                    // Wait for active session or user requesting menu
+                    if let Some(session) = self.wait_for_session().await? {
+                        // Got an active session - enter shell mode
+                        self.state = TerminalState::InShell;
+                        
+                        match self.enter_interactive_mode(session).await? {
+                            InteractionResult::Detached => {
+                                // User wants menu
+                                self.state = TerminalState::InMenu;
                             }
-                            None => {
-                                // User quit menu - show welcome banner and wait
+                            InteractionResult::SessionEnded => {
+                                // Session ended - back to listening
                                 self.show_welcome_banner()?;
+                                self.state = TerminalState::Listening;
                             }
                         }
+                    } else {
+                        // User wants to see menu (has backgrounded sessions)
+                        self.state = TerminalState::InMenu;
                     }
                 }
                 
-                // Wait for active session
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                
-                if let Some(sess) = self.manager.get_active_session().await {
-                    // Wait for stabilization to complete
-                    while *sess.is_stabilizing.read().await {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    }
-                    break sess;
-                }
-            };
-            
-            // Stabilization complete - now enter pure interactive mode
-            match self.enter_interactive_mode(session).await? {
-                InteractionResult::Detached => {
-                    // User pressed Esc - return to menu
+                TerminalState::InMenu => {
+                    // Show menu ONCE and get user choice
                     let mut menu = MainMenu::new(self.manager.clone());
                     match menu.run().await? {
                         Some(session_id) => {
-                            // User selected a session - set it as active
+                            // User selected a session
                             let _ = self.manager.set_active_session(&session_id).await;
-                            continue;
+                            
+                            // Wait for session to be active, then enter shell
+                            if let Some(session) = self.wait_for_active_session().await? {
+                                self.state = TerminalState::InShell;
+                                
+                                match self.enter_interactive_mode(session).await? {
+                                    InteractionResult::Detached => {
+                                        // Back to menu
+                                        self.state = TerminalState::InMenu;
+                                    }
+                                    InteractionResult::SessionEnded => {
+                                        // Back to listening
+                                        self.show_welcome_banner()?;
+                                        self.state = TerminalState::Listening;
+                                    }
+                                }
+                            } else {
+                                // Session disappeared - back to listening
+                                self.show_welcome_banner()?;
+                                self.state = TerminalState::Listening;
+                            }
                         }
                         None => {
-                            // User quit menu - show welcome and wait
+                            // User quit menu - back to listening
                             self.show_welcome_banner()?;
-                            continue;
+                            self.state = TerminalState::Listening;
                         }
                     }
                 }
-                InteractionResult::SessionEnded => {
-                    // Session ended - show welcome and wait for new connection
-                    self.show_welcome_banner()?;
-                    continue;
+                
+                TerminalState::InShell => {
+                    // This should never happen - we handle shell in other states
+                    self.state = TerminalState::Listening;
                 }
             }
         }
+    }
+
+    async fn wait_for_session(&self) -> Result<Option<Arc<super::session::ShellSession>>> {
+        // Wait for either:
+        // 1. An active session to appear
+        // 2. User to have backgrounded sessions (return None to show menu)
+        
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // Check for active session
+            if let Some(sess) = self.manager.get_active_session().await {
+                // Wait for stabilization
+                while *sess.is_stabilizing.read().await {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+                return Ok(Some(sess));
+            }
+            
+            // Check if user has backgrounded sessions
+            if self.manager.session_count() > 0 {
+                // Return None to indicate "show menu"
+                return Ok(None);
+            }
+        }
+    }
+
+    async fn wait_for_active_session(&self) -> Result<Option<Arc<super::session::ShellSession>>> {
+        // Wait for the session that was just set active to actually be active
+        for _ in 0..50 {  // Timeout after 5 seconds
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            if let Some(sess) = self.manager.get_active_session().await {
+                // Wait for stabilization
+                while *sess.is_stabilizing.read().await {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+                return Ok(Some(sess));
+            }
+        }
+        
+        Ok(None)
     }
 
     fn show_welcome_banner(&self) -> Result<()> {
@@ -178,7 +238,6 @@ impl InteractiveTerminal {
         
         // Restore terminal
         disable_raw_mode()?;
-        self.reset_terminal_state()?;
         
         // Clear screen before showing status message
         execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
@@ -189,13 +248,13 @@ impl InteractiveTerminal {
             
             println!();
             self.print_colored("◦  ", MUTED_COLOR);
-            println!("{}", "Session backgrounded - returning to menu".truecolor(120, 120, 130));
+            println!("{}", "Session backgrounded - entering menu".truecolor(120, 120, 130));
             println!();
             
             io::stdout().flush()?;
             
             // Brief pause so user sees the message
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
             
             Ok(InteractionResult::Detached)
         } else {
@@ -207,7 +266,7 @@ impl InteractiveTerminal {
             io::stdout().flush()?;
             
             // Brief pause so user sees the message
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
             
             Ok(InteractionResult::SessionEnded)
         }
