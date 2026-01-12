@@ -62,27 +62,16 @@ impl InteractiveTerminal {
     }
 
     async fn show_welcome_animation(&mut self) -> Result<()> {
-        // Brief glow-in effect - fast and minimal
-        for intensity in [0.4, 0.7, 1.0] {
-            print!("\r");
-            let color = if intensity < 1.0 {
-                Color::Rgb { 
-                    r: (37.0 * intensity) as u8, 
-                    g: (150.0 * intensity) as u8, 
-                    b: (190.0 * intensity) as u8 
-                }
-            } else {
-                PRIMARY_COLOR
-            };
-            
-            self.print_colored("◉ ", color);
-            print!("Listening");
-            
-            io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(60)).await;
-        }
+        // Clean startup banner
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
         
-        println!("\n");
+        self.print_colored("◉  ", PRIMARY_COLOR);
+        println!("{}", "Listening for incoming connections...".bright_white());
+        
+        println!("{}", "   Press Ctrl+C to stop listener".truecolor(120, 120, 130));
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!();
+        
         Ok(())
     }
 
@@ -114,28 +103,21 @@ impl InteractiveTerminal {
                         if state == super::session::ShellState::Background {
                             if in_session {
                                 println!();
-                                self.print_colored("⚠ ", WARNING_COLOR);
-                                println!("Connection lost - session backgrounded");
+                                println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(255, 180, 80));
+                                self.print_colored("⚠  ", WARNING_COLOR);
+                                println!("{}", "Connection lost - session backgrounded".bright_yellow());
+                                println!("{}", "   Use 'cap attach <id>' to reconnect".truecolor(120, 120, 130));
+                                println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(255, 180, 80));
                                 println!();
                                 in_session = false;
                             }
                         } else if !in_session {
                             in_session = true;
-                            
-                            // Show session info when first connected
-                            let metadata = session.get_metadata().await;
-                            println!();
-                            self.print_colored("✓ ", SUCCESS_COLOR);
-                            println!("Interacting with Session <{}>", &session.id[..8].truecolor(86, 33, 213));
-                            if let Some(ref os) = metadata.os_type {
-                                println!("   OS: {}", os.bright_cyan());
-                            }
-                            if let Some(ref user) = metadata.username {
-                                println!("   User: {}", user.bright_cyan());
-                            }
-                            println!();
+                            // Session info is now shown in register_session after stabilization
+                            // No need to print anything here - just mark as in_session
                         }
                         
+                        // Print shell output directly without interference
                         let mut output_rx = session.output_rx.write().await;
                         while let Ok(line) = output_rx.try_recv() {
                             print!("{}", line);
@@ -144,8 +126,11 @@ impl InteractiveTerminal {
                     } else if in_session {
                         in_session = false;
                         println!();
-                        self.print_colored("◦ ", MUTED_COLOR);
-                        println!("Waiting for connection...");
+                        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(120, 120, 130));
+                        self.print_colored("◦  ", MUTED_COLOR);
+                        println!("{}", "Waiting for connection...".truecolor(120, 120, 130));
+                        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(120, 120, 130));
+                        println!();
                     }
                 }
 
