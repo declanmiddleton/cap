@@ -2,14 +2,11 @@ use anyhow::Result;
 use colored::Colorize;
 use crossterm::{
     execute,
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::size,
 };
 use nix::sys::termios::{self, LocalFlags, InputFlags, OutputFlags, ControlFlags, SetArg};
-use nix::poll::{poll, PollFd, PollFlags};
-use std::io::{self, Write, Read};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -214,45 +211,41 @@ impl InteractiveTerminal {
         // Set raw mode NOW
         termios::tcsetattr(&stdin, SetArg::TCSANOW, &raw_termios)?;
         
-        // STEP 2: Direct file descriptor I/O loop
+        // STEP 2: Run passthrough loop (tokio::io::stdin is already non-blocking)
         let result = self.run_passthrough_loop(session.clone()).await;
         
-        // STEP 3: Always restore terminal settings
+        // STEP 3: Restore terminal settings (always, even on error)
         termios::tcsetattr(&stdin, SetArg::TCSANOW, &original_termios)?;
         
         result
     }
     
-    /// TRUE PASSTHROUGH LOOP using raw file descriptors
-    /// This is how professional tools like Penelope, tmux, and ssh work
+    /// TRUE PASSTHROUGH LOOP - async stdin/stdout bridging
     async fn run_passthrough_loop(
         &mut self, 
         session: Arc<super::session::ShellSession>,
     ) -> Result<InteractionResult> {
-        use std::os::fd::AsFd;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         
-        let mut stdin_buffer = [0u8; 4096];
+        let mut stdin_buffer = [0u8; 1];  // Read one byte at a time for immediate forwarding
         let mut esc_buffer = Vec::new();
         let mut esc_timer = std::time::Instant::now();
         let esc_timeout = Duration::from_millis(100);
         
-        let stdin = io::stdin();
+        let mut stdin = tokio::io::stdin();
+        let mut stdout = tokio::io::stdout();
         
         loop {
-            // STEP 1: Check for stdin input (non-blocking)
-            let mut poll_fds = [PollFd::new(&stdin, PollFlags::POLLIN)];
-            
-            match poll(&mut poll_fds, 1) {  // 1ms timeout
-                Ok(n) if n > 0 && poll_fds[0].revents().is_some() => {
-                    // stdin has data - read it
-                    let mut stdin_lock = stdin.lock();
-                    match stdin_lock.read(&mut stdin_buffer) {
+            tokio::select! {
+                // STEP 1: Read from stdin (one byte at a time for immediate forwarding)
+                result = stdin.read(&mut stdin_buffer) => {
+                    match result {
                         Ok(0) => break,  // EOF
                         Ok(n) => {
-                            let bytes = &stdin_buffer[..n];
+                            let byte = stdin_buffer[0];
                             
                             // Esc detection for detachment
-                            if n == 1 && bytes[0] == 0x1b {
+                            if byte == 0x1b {
                                 if esc_buffer.is_empty() {
                                     // First Esc byte
                                     esc_buffer.push(0x1b);
@@ -263,104 +256,51 @@ impl InteractiveTerminal {
                             
                             // If we had an Esc waiting and got more bytes, it's an escape sequence
                             if !esc_buffer.is_empty() {
-                                if bytes[0] != 0x1b {
-                                    // Not bare Esc - it's an escape sequence, forward it
-                                    esc_buffer.extend_from_slice(bytes);
-                                    session.write_raw_bytes(&esc_buffer).await?;
-                                    esc_buffer.clear();
-                                    continue;
-                                }
+                                // Not bare Esc - it's an escape sequence, forward it
+                                esc_buffer.push(byte);
+                                session.write_raw_bytes(&esc_buffer).await?;
+                                esc_buffer.clear();
+                                continue;
                             }
                             
                             // Normal input - forward directly
-                            session.write_raw_bytes(bytes).await?;
-                            esc_buffer.clear();
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            // No data available, continue
+                            session.write_raw_bytes(&stdin_buffer[..n]).await?;
                         }
                         Err(_) => break,
                     }
                 }
-                _ => {}
-            }
-            
-            // Check if bare Esc timed out → detach
-            if !esc_buffer.is_empty() && esc_timer.elapsed() > esc_timeout {
-                let _ = self.manager.background_session(&session.id).await;
-                return Ok(InteractionResult::Detached);
-            }
-            
-            // STEP 2: Check for session output
-            if self.mode == TerminalMode::SessionActive {
-                let mut output_rx = session.output_rx.write().await;
                 
-                // Drain all available output
-                while let Ok(output) = output_rx.try_recv() {
-                    // Write directly to stdout (fd 1)
-                    let mut stdout = io::stdout();
-                    stdout.write_all(output.as_bytes())?;
-                    stdout.flush()?;
+                // Check if bare Esc timed out → detach
+                _ = tokio::time::sleep(Duration::from_millis(10)), if !esc_buffer.is_empty() && esc_timer.elapsed() > esc_timeout => {
+                    let _ = self.manager.background_session(&session.id).await;
+                    return Ok(InteractionResult::Detached);
+                }
+                
+                // STEP 2: Check for session output
+                _ = tokio::time::sleep(Duration::from_millis(1)) => {
+                    if self.mode == TerminalMode::SessionActive {
+                        let mut output_rx = session.output_rx.write().await;
+                        
+                        // Drain all available output
+                        while let Ok(output) = output_rx.try_recv() {
+                            // Write directly to stdout
+                            stdout.write_all(output.as_bytes()).await?;
+                            stdout.flush().await?;
+                        }
+                    }
+                    
+                    // Check if session terminated
+                    let state = session.get_state().await;
+                    if state == super::session::ShellState::Terminated {
+                        return Ok(InteractionResult::SessionEnded);
+                    }
                 }
             }
-            
-            // STEP 3: Check if session terminated
-            let state = session.get_state().await;
-            if state == super::session::ShellState::Terminated {
-                return Ok(InteractionResult::SessionEnded);
-            }
-            
-            // Small sleep to prevent tight looping
-            tokio::time::sleep(Duration::from_micros(100)).await;
         }
         
         Ok(InteractionResult::SessionEnded)
     }
     
-    /// Convert KeyEvent to raw bytes for true passthrough
-    fn key_to_bytes(&self, key: KeyEvent) -> Vec<u8> {
-        match (key.code, key.modifiers) {
-            // Ctrl+C
-            (KeyCode::Char('c'), KeyModifiers::CONTROL) => vec![0x03],
-            // Ctrl+Z
-            (KeyCode::Char('z'), KeyModifiers::CONTROL) => vec![0x1a],
-            // Ctrl+D
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => vec![0x04],
-            // Ctrl+L
-            (KeyCode::Char('l'), KeyModifiers::CONTROL) => vec![0x0c],
-            // Other Ctrl combinations
-            (KeyCode::Char(c), KeyModifiers::CONTROL) => {
-                vec![((c as u8) & 0x1f)]
-            }
-            // Enter → \r (not \n, let remote handle it)
-            (KeyCode::Enter, _) => vec![0x0d],
-            // Tab
-            (KeyCode::Tab, _) => vec![0x09],
-            // Backspace
-            (KeyCode::Backspace, _) => vec![0x7f],
-            // Bare Esc
-            (KeyCode::Esc, _) => vec![0x1b],
-            // Arrow keys (ANSI sequences)
-            (KeyCode::Up, _) => vec![0x1b, 0x5b, 0x41],
-            (KeyCode::Down, _) => vec![0x1b, 0x5b, 0x42],
-            (KeyCode::Right, _) => vec![0x1b, 0x5b, 0x43],
-            (KeyCode::Left, _) => vec![0x1b, 0x5b, 0x44],
-            // Home/End
-            (KeyCode::Home, _) => vec![0x1b, 0x5b, 0x48],
-            (KeyCode::End, _) => vec![0x1b, 0x5b, 0x46],
-            // Page Up/Down
-            (KeyCode::PageUp, _) => vec![0x1b, 0x5b, 0x35, 0x7e],
-            (KeyCode::PageDown, _) => vec![0x1b, 0x5b, 0x36, 0x7e],
-            // Delete
-            (KeyCode::Delete, _) => vec![0x1b, 0x5b, 0x33, 0x7e],
-            // Insert
-            (KeyCode::Insert, _) => vec![0x1b, 0x5b, 0x32, 0x7e],
-            // Regular characters (with shift handled by crossterm)
-            (KeyCode::Char(c), _) => c.to_string().as_bytes().to_vec(),
-            // Everything else - ignore
-            _ => vec![],
-        }
-    }
 
     /// Run menu - EXCLUSIVE terminal ownership (alternate screen)
     async fn run_menu(&mut self) -> Result<()> {
