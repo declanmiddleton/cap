@@ -6,7 +6,10 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::size,
 };
-use std::io::{self, Write};
+use nix::sys::termios::{self, LocalFlags, InputFlags, OutputFlags, ControlFlags, SetArg};
+use nix::poll::{poll, PollFd, PollFlags};
+use std::io::{self, Write, Read};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -186,101 +189,132 @@ impl InteractiveTerminal {
             }
         });
         
-        let mut detach_requested = false;
-        let mut esc_sequence = Vec::new();
-        let esc_timeout = Duration::from_millis(100);
-        let mut last_byte_time = std::time::Instant::now();
+        // STEP 1: Save current terminal settings and enter raw mode
+        use std::os::fd::AsFd;
+        let stdin = io::stdin();
+        let original_termios = termios::tcgetattr(&stdin)?;
         
-        // TRUE PASSTHROUGH LOOP - byte-for-byte forwarding
+        // Configure raw mode manually (like cfmakeraw)
+        let mut raw_termios = original_termios.clone();
+        
+        // Input flags: no break, no CR to NL, no parity check, no strip char, no start/stop output control
+        raw_termios.input_flags &= !(InputFlags::BRKINT | InputFlags::ICRNL | InputFlags::INPCK | 
+                                       InputFlags::ISTRIP | InputFlags::IXON);
+        
+        // Output flags: disable post processing
+        raw_termios.output_flags &= !OutputFlags::OPOST;
+        
+        // Control flags: set 8 bit chars
+        raw_termios.control_flags |= ControlFlags::CS8;
+        
+        // Local flags: no echo, no canonical mode, no extended functions, no signal chars
+        raw_termios.local_flags &= !(LocalFlags::ECHO | LocalFlags::ICANON | LocalFlags::IEXTEN | 
+                                      LocalFlags::ISIG);
+        
+        // Set raw mode NOW
+        termios::tcsetattr(&stdin, SetArg::TCSANOW, &raw_termios)?;
+        
+        // STEP 2: Direct file descriptor I/O loop
+        let result = self.run_passthrough_loop(session.clone()).await;
+        
+        // STEP 3: Always restore terminal settings
+        termios::tcsetattr(&stdin, SetArg::TCSANOW, &original_termios)?;
+        
+        result
+    }
+    
+    /// TRUE PASSTHROUGH LOOP using raw file descriptors
+    /// This is how professional tools like Penelope, tmux, and ssh work
+    async fn run_passthrough_loop(
+        &mut self, 
+        session: Arc<super::session::ShellSession>,
+    ) -> Result<InteractionResult> {
+        use std::os::fd::AsFd;
+        
+        let mut stdin_buffer = [0u8; 4096];
+        let mut esc_buffer = Vec::new();
+        let mut esc_timer = std::time::Instant::now();
+        let esc_timeout = Duration::from_millis(100);
+        
+        let stdin = io::stdin();
+        
         loop {
-            tokio::select! {
-                // Keyboard input → remote shell (byte-for-byte, no interpretation)
-                _ = tokio::time::sleep(Duration::from_millis(1)) => {
-                    // Poll for keyboard events in raw mode
-                    if event::poll(Duration::from_millis(0))? {
-                        match event::read()? {
-                            Event::Key(key) => {
-                                // Convert key to raw bytes
-                                let bytes = self.key_to_bytes(key);
-                                
-                                // Special case: bare Esc key for detachment
-                                if bytes == vec![0x1b] {
-                                    // Start Esc sequence detection
-                                    esc_sequence.clear();
-                                    esc_sequence.push(0x1b);
-                                    last_byte_time = std::time::Instant::now();
+            // STEP 1: Check for stdin input (non-blocking)
+            let mut poll_fds = [PollFd::new(&stdin, PollFlags::POLLIN)];
+            
+            match poll(&mut poll_fds, 1) {  // 1ms timeout
+                Ok(n) if n > 0 && poll_fds[0].revents().is_some() => {
+                    // stdin has data - read it
+                    let mut stdin_lock = stdin.lock();
+                    match stdin_lock.read(&mut stdin_buffer) {
+                        Ok(0) => break,  // EOF
+                        Ok(n) => {
+                            let bytes = &stdin_buffer[..n];
+                            
+                            // Esc detection for detachment
+                            if n == 1 && bytes[0] == 0x1b {
+                                if esc_buffer.is_empty() {
+                                    // First Esc byte
+                                    esc_buffer.push(0x1b);
+                                    esc_timer = std::time::Instant::now();
                                     continue;
                                 }
-                                
-                                // If we have Esc sequence in progress, check if it's expanding
-                                if !esc_sequence.is_empty() {
-                                    if bytes.starts_with(&[0x1b]) && bytes.len() > 1 {
-                                        // This is an escape sequence (arrow key, etc.), not bare Esc
-                                        esc_sequence.clear();
-                                        // Fall through to send it
-                                    } else if last_byte_time.elapsed() > esc_timeout {
-                                        // Bare Esc timed out - detach
-                                        detach_requested = true;
-                                        break;
-                                    }
-                                }
-                                
-                                // Forward bytes EXACTLY as received - direct TCP write
-                                if let Err(_) = session.write_raw_bytes(&bytes).await {
-                                    break; // Session died
-                                }
-                                
-                                // Clear Esc sequence since we sent something else
-                                esc_sequence.clear();
                             }
-                            Event::Resize(cols, rows) => {
-                                let _ = session.send_command(
-                                    format!("stty rows {} cols {} 2>/dev/null\r", rows, cols)
-                                ).await;
+                            
+                            // If we had an Esc waiting and got more bytes, it's an escape sequence
+                            if !esc_buffer.is_empty() {
+                                if bytes[0] != 0x1b {
+                                    // Not bare Esc - it's an escape sequence, forward it
+                                    esc_buffer.extend_from_slice(bytes);
+                                    session.write_raw_bytes(&esc_buffer).await?;
+                                    esc_buffer.clear();
+                                    continue;
+                                }
                             }
-                            _ => {}
+                            
+                            // Normal input - forward directly
+                            session.write_raw_bytes(bytes).await?;
+                            esc_buffer.clear();
                         }
-                    } else if !esc_sequence.is_empty() && last_byte_time.elapsed() > esc_timeout {
-                        // Bare Esc timed out - detach
-                        detach_requested = true;
-                        break;
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            // No data available, continue
+                        }
+                        Err(_) => break,
                     }
                 }
+                _ => {}
+            }
+            
+            // Check if bare Esc timed out → detach
+            if !esc_buffer.is_empty() && esc_timer.elapsed() > esc_timeout {
+                let _ = self.manager.background_session(&session.id).await;
+                return Ok(InteractionResult::Detached);
+            }
+            
+            // STEP 2: Check for session output
+            if self.mode == TerminalMode::SessionActive {
+                let mut output_rx = session.output_rx.write().await;
                 
-                // Remote shell output → stdout (direct, no buffering, no formatting)
-                _ = tokio::time::sleep(Duration::from_millis(1)) => {
-                    if self.mode == TerminalMode::SessionActive {
-                        let mut output_rx = session.output_rx.write().await;
-                        
-                        // Drain ALL available output immediately
-                        let mut has_output = false;
-                        while let Ok(output) = output_rx.try_recv() {
-                            // Write directly to stdout - zero interpretation
-                            print!("{}", output);
-                            has_output = true;
-                        }
-                        
-                        // Flush immediately if we got any output
-                        if has_output {
-                            io::stdout().flush()?;
-                        }
-                    }
+                // Drain all available output
+                while let Ok(output) = output_rx.try_recv() {
+                    // Write directly to stdout (fd 1)
+                    let mut stdout = io::stdout();
+                    stdout.write_all(output.as_bytes())?;
+                    stdout.flush()?;
                 }
             }
             
-            // Check if session ended
+            // STEP 3: Check if session terminated
             let state = session.get_state().await;
             if state == super::session::ShellState::Terminated {
-                break;
+                return Ok(InteractionResult::SessionEnded);
             }
+            
+            // Small sleep to prevent tight looping
+            tokio::time::sleep(Duration::from_micros(100)).await;
         }
         
-        if detach_requested {
-            let _ = self.manager.background_session(&session.id).await;
-            Ok(InteractionResult::Detached)
-        } else {
-            Ok(InteractionResult::SessionEnded)
-        }
+        Ok(InteractionResult::SessionEnded)
     }
     
     /// Convert KeyEvent to raw bytes for true passthrough

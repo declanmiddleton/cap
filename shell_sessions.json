@@ -1,0 +1,11 @@
+[
+  {
+    "id": "3e48fb09-281b-479b-a395-e0d08b43533b",
+    "remote_addr": "10.10.10.75:50190",
+    "state": "Active",
+    "connected_at": "2026-01-12T22:02:12.945158846+00:00",
+    "hostname": "Nibbles",
+    "username": "Nibbles",
+    "privilege": "User"
+  }
+]
