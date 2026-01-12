@@ -1,130 +1,244 @@
-<img width="1056" height="357" alt="image" src="https://github.com/user-attachments/assets/d2359001-218c-47f1-aa99-a00432006854" />
+# CAP
 
+**Central Access Point** — A streamlined shell management and post-exploitation tool built for efficiency.
 
+<img width="1056" height="357" alt="CAP Banner" src="https://github.com/user-attachments/assets/d2359001-218c-47f1-aa99-a00432006854" />
 
-## Description & Purpose
+---
 
-CAP (Comprehensive Assessment Platform) is a modern, Rust-based security assessment and orchestration framework designed for authorized penetration testing, defensive research, and security training.
+## What is CAP?
 
-CAP provides a unified interface for reconnaissance, session handling, and controlled shell interaction, with a strong emphasis on scope enforcement, auditability, and operational safety.
-Unlike traditional C2 frameworks, CAP is intentionally opinionated: all actions are scoped, logged, and attributable.
+CAP (Central Access Point) is a **practical penetration testing tool** designed to save time during engagements by simplifying common post-exploitation tasks. It's not a framework—it's a focused utility that handles the tedious work so you can focus on the assessment.
 
-The framework is suitable for use during authorized post-exploitation phases, controlled red team engagements, blue team validation, lab environments, and educational use cases.
+### Why CAP?
 
-CAP is built from the ground up in Rust, prioritizing memory safety, performance, and transparency, while still offering the practical ergonomics expected from modern security tooling.
+Stop wasting time on:
+- Upgrading basic shells manually
+- Managing multiple reverse shell sessions across tabs
+- Copy-pasting privilege escalation commands
+- Switching between scattered tools for enumeration
+- Losing context when you background a session
 
-## What CAP Is (and Is Not)
-CAP is:
-- A security assessment framework
-- A controlled shell listener
-- A reconnaissance and enumeration orchestrator
-- A research and training framework
-- An toolkit
-  
-CAP is not:
-- A malware framework
-- A Black Hat Hacking Framework
-  
-Typical scenarios include:
-- Authorized penetration tests
-- Red team reconnaissance and post-exploitation
-- Security research and tool development
-- CTFs and lab environments
+CAP consolidates these workflows into a single, efficient interface.
 
+---
 
-## Installation
-# Linux
-On most Linux distributions, Rust can be installed either through the system package manager or via the official Rust installer. On Debian-based systems such as Ubuntu, Pop!_OS, Kali Linux, and Parrot OS, Rust and Cargo can be installed using:
+## Key Features
+
+### 🎯 **Shell Management**
+- **Interactive listener** with clean, guided setup
+- **Multi-session handling** — run, background, attach, and switch between shells seamlessly
+- **Persistent context** — see target info, privilege level, and session age at a glance
+- **Session notes** — annotate shells with custom metadata for tracking
+
+### 🔧 **Built-in Capabilities**
+- **Privilege escalation helpers** — common techniques ready to deploy
+- **Web vulnerability testing** — SQL injection, SSTI detection, and fingerprinting
+- **Network enumeration** — port scanning and DNS discovery
+- **Audit logging** — all actions logged with timestamps for reporting
+
+### ⚡ **Time-Saving Design**
+- **Single binary** — no dependencies, no installation scripts
+- **Scope enforcement** — stay within authorized targets
+- **Fast workflows** — everything accessible from one interface
+
+---
+
+## Quick Start
+
+### Installation
+
+**Requirements:** Rust toolchain (1.70+)
 
 ```bash
+# Clone the repository
+git clone https://github.com/declanmiddleton/cap.git
+cd cap
+
+# Build the release binary
+cargo build --release
+
+# Run CAP
+./target/release/cap --help
+```
+
+### Basic Usage
+
+```bash
+# Start a listener (interactive setup)
+cap listen
+
+# List active sessions
+cap sessions
+
+# Attach to a session
+cap attach <session-id>
+
+# Add notes to a session
+cap note <session-id> "Domain Admin shell - DC01"
+
+# Kill a session
+cap kill <session-id>
+```
+
+---
+
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Linux** | ✅ Fully supported | Debian, Ubuntu, Arch, Kali, Parrot |
+| **macOS** | ✅ Fully supported | Apple Silicon & Intel |
+| **Windows** | ✅ Fully supported | MSVC toolchain required |
+
+### Building for Linux (Static Binary)
+
+For maximum portability, build a static binary using musl:
+
+```bash
+# Install musl target
+rustup target add x86_64-unknown-linux-musl
+
+# Build static binary
+cargo build --release --target x86_64-unknown-linux-musl
+
+# Binary location
+./target/x86_64-unknown-linux-musl/release/cap
+```
+
+This creates a standalone executable with no runtime dependencies.
+
+---
+
+## Use Cases
+
+CAP is designed for **authorized security assessments** including:
+
+- 🔴 **Penetration Testing** — streamline post-exploitation and enumeration
+- 🟣 **Red Team Operations** — manage multiple access points efficiently
+- 🔵 **Blue Team Validation** — test detection and response capabilities
+- 🧪 **Security Research** — rapid prototyping and testing
+- 🎓 **Training & Labs** — educational environments and CTFs
+
+---
+
+## What CAP Is Not
+
+CAP is **not**:
+- ❌ A malware framework
+- ❌ An evasion toolkit
+- ❌ A general-purpose C2 system
+- ❌ Designed for unauthorized access
+
+**Use responsibly.** CAP is intended for authorized engagements only. Users are responsible for compliance with applicable laws and regulations.
+
+---
+
+## Design Philosophy
+
+**Simplicity over complexity** — CAP does a few things well instead of trying to be everything.
+
+- **Shell-first** — built around the reality of post-exploitation work
+- **Fast workflows** — reduce friction and context-switching
+- **Transparent operations** — audit logs and scope controls built-in
+- **Self-contained** — single binary, minimal configuration
+
+CAP is written in Rust for memory safety, performance, and reliability. It produces a single static binary with no runtime dependencies.
+
+---
+
+## Project Status
+
+CAP is under **active development** and will remain **open-source**.
+
+### Roadmap
+- [ ] Interactive privilege escalation module
+- [ ] Extended protocol support (SMB, SSH)
+- [ ] Session history and replay
+- [ ] Custom payload generation
+- [ ] Enhanced web module capabilities
+
+Contributions, bug reports, and feature requests are welcome.
+
+---
+
+## Installation Details
+
+### Linux (Debian/Ubuntu/Kali/Parrot)
+
+```bash
+# Install Rust via package manager
 sudo apt update
 sudo apt install cargo rustc
+
+# Clone and build
+git clone https://github.com/declanmiddleton/cap.git
+cd cap
+cargo build --release
 ```
 
-On Arch Linux and Arch-based distributions, Rust is available from the official repositories and can be installed using:
+### Linux (Arch-based)
 
 ```bash
+# Install Rust
 sudo pacman -S rust cargo
-```
 
-If Kerberos-authenticated functionality is required, the Kerberos client package must also be installed. On Debian-based systems this package is typically named `krb5-user`, while on Arch-based systems it is provided by `krb5`.
-
-Once Rust is installed, CAP can be built from source by cloning the repository and compiling it with Cargo:
-
-```bash
+# Clone and build
 git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
 
-The compiled binary will be available at `target/release/cap` and can be executed directly or moved into a directory included in the system PATH.
-
-
-# Static Linux Build
-CAP can be built as a statically linked binary for portability across Linux systems. This is useful when transferring the binary between machines or running it in minimal environments.
-To build a static binary using musl, first install the musl target:
-```bash
-rustup target add x86_64-unknown-linux-musl
-```
-On Debian-based systems, the musl toolchain can be installed with:
-```bash
-sudo apt install musl-tools
-```
-On Arch Linux, the musl toolchain is available via:
-```bash
-sudo pacman -S musl
-```
-Once installed, build the static binary using:
-```bash
-cargo build --release --target x86_64-unknown-linux-musl
-```
-The resulting static binary will be located at:
-```text
-target/x86_64-unknown-linux-musl/release/cap
-```
-This binary can be copied and executed on compatible Linux systems without additional runtime dependencies.
-
-# macOS
-On macOS, Rust can be installed using Homebrew or the official Rust installer. If Homebrew is installed, Rust can be installed with:
+### macOS
 
 ```bash
+# Install Rust via Homebrew
 brew install rust
-```
 
-Alternatively, the official installer can be used:
-
-```bash
+# Or use the official installer
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
 
-After installing Rust, CAP can be built normally using Cargo:
-
-```bash
+# Clone and build
 git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
-
-The resulting binary will be available at `target/release/cap`. macOS static linking is not supported in the same way as Linux, but the release binary is fully self-contained for the target system.
 
 ### Windows
-On Windows, Rust can be installed using the official Rust installer from [https://rustup.rs](https://rustup.rs). During installation, select the MSVC toolchain when prompted.
-Once Rust and Cargo are installed, CAP can be built from a standard command prompt or PowerShell:
 
 ```powershell
+# Install Rust from https://rustup.rs (select MSVC toolchain)
+
+# Clone and build
 git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
 
-The compiled executable will be located at:
+**Note:** Windows Defender may flag security tools. Add exclusions in lab environments as needed.
 
-```text
-target\release\cap.exe
-```
+---
 
-Windows Defender or other endpoint security products may flag security tooling binaries. If this occurs in a lab or authorized environment, appropriate exclusions may be required.
+## License
 
-### Notes
-CAP relies only on standard terminal capabilities for its interactive features. Command history, tab completion, and session navigation are supported on modern terminals without additional configuration. All builds produce a single binary that can be executed directly without runtime dependencies. This tool remains in development and will continue to remain open-source to viewing. 
+See [LICENSE](LICENSE) for details.
 
+---
+
+## Disclaimer
+
+This tool is provided for **authorized security testing and research purposes only**. Unauthorized access to computer systems is illegal. Users must obtain proper authorization before use. The authors assume no liability for misuse or damage caused by this tool.
+
+**By using CAP, you agree to use it responsibly and in compliance with all applicable laws.**
+
+---
+
+## Support & Contact
+
+- **Issues:** [GitHub Issues](https://github.com/declanmiddleton/cap/issues)
+- **Contributions:** Pull requests welcome
+- **Documentation:** See `examples/` directory for usage guides
+
+---
+
+*CAP — Because time spent upgrading shells is time not spent finding vulnerabilities.*
