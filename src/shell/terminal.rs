@@ -225,9 +225,8 @@ impl InteractiveTerminal {
                                     }
                                 }
                                 
-                                // Forward bytes EXACTLY as received - no modification
-                                let input = String::from_utf8_lossy(&bytes).to_string();
-                                if let Err(_) = session.send_command(input).await {
+                                // Forward bytes EXACTLY as received - direct TCP write
+                                if let Err(_) = session.write_raw_bytes(&bytes).await {
                                     break; // Session died
                                 }
                                 

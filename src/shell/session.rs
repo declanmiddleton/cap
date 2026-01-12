@@ -271,6 +271,16 @@ impl ShellSession {
         self.input_tx.send(cmd)?;
         Ok(())
     }
+    
+    /// Write raw bytes directly to the TCP stream without any processing
+    /// Used for true passthrough mode - no newlines added, no interpretation
+    pub async fn write_raw_bytes(&self, bytes: &[u8]) -> Result<()> {
+        if let Some(stream) = self.stream.write().await.as_mut() {
+            stream.write_all(bytes).await?;
+            stream.flush().await?;
+        }
+        Ok(())
+    }
 
     pub async fn get_state(&self) -> ShellState {
         self.state.read().await.clone()
