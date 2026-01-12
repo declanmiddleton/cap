@@ -62,17 +62,24 @@ impl InteractiveTerminal {
     }
 
     async fn show_welcome_animation(&mut self) -> Result<()> {
-        // Soft fade-in effect
-        for opacity in [0.3, 0.5, 0.7, 0.9, 1.0] {
+        // Brief glow-in effect - fast and minimal
+        for intensity in [0.4, 0.7, 1.0] {
             print!("\r");
-            self.print_colored("◉ ", PRIMARY_COLOR);
-            print!("Listening for connections");
+            let color = if intensity < 1.0 {
+                Color::Rgb { 
+                    r: (37.0 * intensity) as u8, 
+                    g: (150.0 * intensity) as u8, 
+                    b: (190.0 * intensity) as u8 
+                }
+            } else {
+                PRIMARY_COLOR
+            };
             
-            let dots = (opacity * 3.0) as usize;
-            print!("{}", ".".repeat(dots));
+            self.print_colored("◉ ", color);
+            print!("Listening");
             
             io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(60)).await;
         }
         
         println!("\n");
@@ -166,65 +173,94 @@ impl InteractiveTerminal {
     }
 
     async fn show_session_capture_animation(&self) -> Result<()> {
-        // Soft pulse effect
+        // Brief glow-in effect when session captured
         println!();
-        for _ in 0..3 {
+        
+        for intensity in [0.5, 0.8, 1.0, 0.9, 1.0] {
             print!("\r");
-            self.print_colored("◉ ", SUCCESS_COLOR);
-            print!("Session captured");
-            io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(80)).await;
             
-            print!("\r");
-            self.print_colored("◎ ", SUCCESS_COLOR);
+            let color = Color::Rgb { 
+                r: (80.0 + 20.0 * intensity) as u8, 
+                g: (180.0 + 20.0 * intensity) as u8, 
+                b: (120.0 * intensity) as u8 
+            };
+            
+            self.print_colored("◉ ", color);
             print!("Session captured");
             io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(80)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         
-        print!("\r");
-        self.print_colored("◉ ", SUCCESS_COLOR);
-        println!("Session captured\n");
+        println!("\n");
         Ok(())
     }
 
     async fn show_session_connected_animation(&self) -> Result<()> {
-        // Brief underline sweep
-        self.print_colored("▔", PRIMARY_COLOR);
-        for _ in 0..30 {
-            self.print_colored("▔", PRIMARY_COLOR);
+        // Soft horizontal sweep under prompt
+        for width in 1..=25 {
+            print!("\r");
+            for _ in 0..width {
+                self.print_colored("▔", PRIMARY_COLOR);
+            }
             io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(5)).await;
+            tokio::time::sleep(Duration::from_millis(3)).await;
         }
         println!("\n");
         Ok(())
     }
 
     async fn show_exit_animation(&self) -> Result<()> {
+        // Smooth fade-out
         println!();
-        for opacity in [1.0, 0.7, 0.4, 0.2] {
+        for intensity in [1.0, 0.6, 0.3, 0.1] {
             print!("\r");
-            if opacity > 0.5 {
-                self.print_colored("◉ ", PRIMARY_COLOR);
-            } else {
-                self.print_colored("◦ ", MUTED_COLOR);
-            }
-            print!("Session closed");
+            
+            let color = Color::Rgb { 
+                r: (37.0 * intensity) as u8, 
+                g: (150.0 * intensity) as u8, 
+                b: (190.0 * intensity) as u8 
+            };
+            
+            let symbol = if intensity > 0.5 { "◉" } else { "◦" };
+            self.print_colored(symbol, color);
+            print!(" ");
+            
             io::stdout().flush()?;
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(60)).await;
         }
         println!("\r                    ");
         Ok(())
     }
 
+    async fn show_session_transition(&self) -> Result<()> {
+        // Smooth fade when switching sessions
+        for intensity in [1.0, 0.7, 0.4, 0.7, 1.0] {
+            print!("\r");
+            
+            let color = Color::Rgb { 
+                r: (37.0 * intensity) as u8, 
+                g: (150.0 * intensity) as u8, 
+                b: (190.0 * intensity) as u8 
+            };
+            
+            self.print_colored("◉ ", color);
+            print!("Switching");
+            io::stdout().flush()?;
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+        
+        print!("\r                    \r");
+        Ok(())
+    }
+
     async fn show_reconnection_shimmer(&self) -> Result<()> {
-        // Quiet loading shimmer during reconnection attempts
-        let shimmer_chars = ['◜', '◝', '◞', '◟'];
+        // Low-frequency pulse during reconnection attempts
+        let pulse_chars = ['◉', '◎', '◉', '◉'];
         let frame = (self.animation_frame % 4) as usize;
         
         print!("\r");
-        self.print_colored(&format!("{} ", shimmer_chars[frame]), SECONDARY_COLOR);
-        print!("Connection interrupted - maintaining session");
+        self.print_colored(&format!("{} ", pulse_chars[frame]), SECONDARY_COLOR);
+        print!("Connection interrupted");
         io::stdout().flush()?;
         
         Ok(())
@@ -439,23 +475,20 @@ impl InteractiveTerminal {
         self.print_colored("Controls\n", PRIMARY_COLOR);
         println!();
         
-        self.print_colored("  Ctrl+D  ", SECONDARY_COLOR);
+        self.print_colored("  Ctrl+D   ", SECONDARY_COLOR);
         println!("detach");
         
-        self.print_colored("  Ctrl+C  ", SECONDARY_COLOR);
+        self.print_colored("  Ctrl+C   ", SECONDARY_COLOR);
         println!("interrupt");
         
-        self.print_colored("  Ctrl+L  ", SECONDARY_COLOR);
-        println!("list sessions");
+        self.print_colored("  Ctrl+L   ", SECONDARY_COLOR);
+        println!("sessions");
         
-        self.print_colored("  Ctrl+N  ", SECONDARY_COLOR);
-        println!("add note");
+        self.print_colored("  Ctrl+N   ", SECONDARY_COLOR);
+        println!("note");
         
-        self.print_colored("  Esc     ", SECONDARY_COLOR);
-        println!("background session");
-        
-        self.print_colored("  q       ", SECONDARY_COLOR);
-        println!("quit (when no active session)");
+        self.print_colored("  Esc      ", SECONDARY_COLOR);
+        println!("background");
         
         println!();
         Ok(())
@@ -463,10 +496,11 @@ impl InteractiveTerminal {
 
     async fn add_session_note(&self, session: &Arc<super::session::ShellSession>) -> Result<()> {
         println!();
-        self.print_colored("Note: ", ACCENT_COLOR);
+        self.print_colored("◉ ", ACCENT_COLOR);
+        print!("Note: ");
         io::stdout().flush()?;
         
-        // Simple note input (in production, this would be more sophisticated)
+        // Simple note input
         let mut note = String::new();
         disable_raw_mode()?;
         io::stdin().read_line(&mut note)?;
@@ -475,8 +509,11 @@ impl InteractiveTerminal {
         let note = note.trim().to_string();
         if !note.is_empty() {
             session.set_notes(note).await;
-            self.print_colored("  ◉ ", SUCCESS_COLOR);
-            println!("Note saved");
+            print!("\r");
+            self.print_colored("◉ ", SUCCESS_COLOR);
+            println!("Saved\n");
+        } else {
+            print!("\r                    \r");
         }
         
         Ok(())
