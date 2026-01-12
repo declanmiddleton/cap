@@ -160,28 +160,79 @@ impl InteractiveTerminal {
         Ok(())
     }
 
-    /// Run interactive session - EXCLUSIVE terminal ownership
+    /// Run interactive session - TRUE PASSTHROUGH MODE
+    /// Becomes a transparent bridge: stdin → remote shell → stdout
     async fn run_session(&mut self, session: Arc<super::session::ShellSession>) -> Result<InteractionResult> {
-        // Session owns terminal completely
-        // Set terminal size
+        // Set terminal size on remote
         if let Ok((cols, rows)) = size() {
             let _ = session.send_command(format!("stty rows {} cols {} 2>/dev/null\n", rows, cols)).await;
         }
         
-        let mut detach_requested = false;
+        // Signal handler for terminal resize
+        let resize_session = session.clone();
+        tokio::spawn(async move {
+            use signal_hook::consts::SIGWINCH;
+            use signal_hook_tokio::Signals;
+            use futures::stream::StreamExt;
+            
+            if let Ok(mut signals) = Signals::new(&[SIGWINCH]) {
+                while signals.next().await.is_some() {
+                    if let Ok((cols, rows)) = size() {
+                        let _ = resize_session.send_command(
+                            format!("stty rows {} cols {} 2>/dev/null\r", rows, cols)
+                        ).await;
+                    }
+                }
+            }
+        });
         
-        // Pure passthrough loop
+        let mut detach_requested = false;
+        let mut esc_sequence = Vec::new();
+        let esc_timeout = Duration::from_millis(100);
+        let mut last_byte_time = std::time::Instant::now();
+        
+        // TRUE PASSTHROUGH LOOP - byte-for-byte forwarding
         loop {
             tokio::select! {
-                // Handle keyboard -> shell
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                // Keyboard input → remote shell (byte-for-byte, no interpretation)
+                _ = tokio::time::sleep(Duration::from_millis(1)) => {
+                    // Poll for keyboard events in raw mode
                     if event::poll(Duration::from_millis(0))? {
                         match event::read()? {
                             Event::Key(key) => {
-                                if self.handle_key(key, &session).await? {
-                                    detach_requested = true;
-                                    break;
+                                // Convert key to raw bytes
+                                let bytes = self.key_to_bytes(key);
+                                
+                                // Special case: bare Esc key for detachment
+                                if bytes == vec![0x1b] {
+                                    // Start Esc sequence detection
+                                    esc_sequence.clear();
+                                    esc_sequence.push(0x1b);
+                                    last_byte_time = std::time::Instant::now();
+                                    continue;
                                 }
+                                
+                                // If we have Esc sequence in progress, check if it's expanding
+                                if !esc_sequence.is_empty() {
+                                    if bytes.starts_with(&[0x1b]) && bytes.len() > 1 {
+                                        // This is an escape sequence (arrow key, etc.), not bare Esc
+                                        esc_sequence.clear();
+                                        // Fall through to send it
+                                    } else if last_byte_time.elapsed() > esc_timeout {
+                                        // Bare Esc timed out - detach
+                                        detach_requested = true;
+                                        break;
+                                    }
+                                }
+                                
+                                // Forward bytes EXACTLY as received - no modification
+                                let input = String::from_utf8_lossy(&bytes).to_string();
+                                if let Err(_) = session.send_command(input).await {
+                                    break; // Session died
+                                }
+                                
+                                // Clear Esc sequence since we sent something else
+                                esc_sequence.clear();
                             }
                             Event::Resize(cols, rows) => {
                                 let _ = session.send_command(
@@ -190,16 +241,28 @@ impl InteractiveTerminal {
                             }
                             _ => {}
                         }
+                    } else if !esc_sequence.is_empty() && last_byte_time.elapsed() > esc_timeout {
+                        // Bare Esc timed out - detach
+                        detach_requested = true;
+                        break;
                     }
                 }
                 
-                // Handle shell output -> stdout (ONLY in SessionActive mode)
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                // Remote shell output → stdout (direct, no buffering, no formatting)
+                _ = tokio::time::sleep(Duration::from_millis(1)) => {
                     if self.mode == TerminalMode::SessionActive {
                         let mut output_rx = session.output_rx.write().await;
+                        
+                        // Drain ALL available output immediately
+                        let mut has_output = false;
                         while let Ok(output) = output_rx.try_recv() {
-                            // Direct write - we own the terminal
+                            // Write directly to stdout - zero interpretation
                             print!("{}", output);
+                            has_output = true;
+                        }
+                        
+                        // Flush immediately if we got any output
+                        if has_output {
                             io::stdout().flush()?;
                         }
                     }
@@ -218,6 +281,51 @@ impl InteractiveTerminal {
             Ok(InteractionResult::Detached)
         } else {
             Ok(InteractionResult::SessionEnded)
+        }
+    }
+    
+    /// Convert KeyEvent to raw bytes for true passthrough
+    fn key_to_bytes(&self, key: KeyEvent) -> Vec<u8> {
+        match (key.code, key.modifiers) {
+            // Ctrl+C
+            (KeyCode::Char('c'), KeyModifiers::CONTROL) => vec![0x03],
+            // Ctrl+Z
+            (KeyCode::Char('z'), KeyModifiers::CONTROL) => vec![0x1a],
+            // Ctrl+D
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => vec![0x04],
+            // Ctrl+L
+            (KeyCode::Char('l'), KeyModifiers::CONTROL) => vec![0x0c],
+            // Other Ctrl combinations
+            (KeyCode::Char(c), KeyModifiers::CONTROL) => {
+                vec![((c as u8) & 0x1f)]
+            }
+            // Enter → \r (not \n, let remote handle it)
+            (KeyCode::Enter, _) => vec![0x0d],
+            // Tab
+            (KeyCode::Tab, _) => vec![0x09],
+            // Backspace
+            (KeyCode::Backspace, _) => vec![0x7f],
+            // Bare Esc
+            (KeyCode::Esc, _) => vec![0x1b],
+            // Arrow keys (ANSI sequences)
+            (KeyCode::Up, _) => vec![0x1b, 0x5b, 0x41],
+            (KeyCode::Down, _) => vec![0x1b, 0x5b, 0x42],
+            (KeyCode::Right, _) => vec![0x1b, 0x5b, 0x43],
+            (KeyCode::Left, _) => vec![0x1b, 0x5b, 0x44],
+            // Home/End
+            (KeyCode::Home, _) => vec![0x1b, 0x5b, 0x48],
+            (KeyCode::End, _) => vec![0x1b, 0x5b, 0x46],
+            // Page Up/Down
+            (KeyCode::PageUp, _) => vec![0x1b, 0x5b, 0x35, 0x7e],
+            (KeyCode::PageDown, _) => vec![0x1b, 0x5b, 0x36, 0x7e],
+            // Delete
+            (KeyCode::Delete, _) => vec![0x1b, 0x5b, 0x33, 0x7e],
+            // Insert
+            (KeyCode::Insert, _) => vec![0x1b, 0x5b, 0x32, 0x7e],
+            // Regular characters (with shift handled by crossterm)
+            (KeyCode::Char(c), _) => c.to_string().as_bytes().to_vec(),
+            // Everything else - ignore
+            _ => vec![],
         }
     }
 
@@ -281,107 +389,6 @@ impl InteractiveTerminal {
         }
     }
 
-    async fn handle_key(&self, key: KeyEvent, session: &Arc<super::session::ShellSession>) -> Result<bool> {
-        match (key.code, key.modifiers) {
-            // Esc = detach (return to menu)
-            (KeyCode::Esc, _) => Ok(true),
-            
-            // Ctrl+C = pass to shell
-            (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                session.send_command("\x03".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Ctrl+Z = pass to shell
-            (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
-                session.send_command("\x1a".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Ctrl+L = pass to shell
-            (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
-                session.send_command("\x0c".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Enter
-            (KeyCode::Enter, _) => {
-                session.send_command("\r\n".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Tab
-            (KeyCode::Tab, _) => {
-                session.send_command("\t".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Backspace
-            (KeyCode::Backspace, _) => {
-                session.send_command("\x7f".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Arrow keys
-            (KeyCode::Up, _) => {
-                session.send_command("\x1b[A".to_string()).await?;
-                Ok(false)
-            }
-            (KeyCode::Down, _) => {
-                session.send_command("\x1b[B".to_string()).await?;
-                Ok(false)
-            }
-            (KeyCode::Right, _) => {
-                session.send_command("\x1b[C".to_string()).await?;
-                Ok(false)
-            }
-            (KeyCode::Left, _) => {
-                session.send_command("\x1b[D".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Home/End
-            (KeyCode::Home, _) => {
-                session.send_command("\x1b[H".to_string()).await?;
-                Ok(false)
-            }
-            (KeyCode::End, _) => {
-                session.send_command("\x1b[F".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Page Up/Down
-            (KeyCode::PageUp, _) => {
-                session.send_command("\x1b[5~".to_string()).await?;
-                Ok(false)
-            }
-            (KeyCode::PageDown, _) => {
-                session.send_command("\x1b[6~".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Delete
-            (KeyCode::Delete, _) => {
-                session.send_command("\x1b[3~".to_string()).await?;
-                Ok(false)
-            }
-            
-            // Regular characters
-            (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-                session.send_command(c.to_string()).await?;
-                Ok(false)
-            }
-            
-            // Other Ctrl+ combinations
-            (KeyCode::Char(c), KeyModifiers::CONTROL) => {
-                let ctrl_char = ((c as u8) & 0x1f) as char;
-                session.send_command(ctrl_char.to_string()).await?;
-                Ok(false)
-            }
-            
-            _ => Ok(false)
-        }
-    }
 
     fn print_colored(&self, text: &str, color: Color) {
         let _ = execute!(io::stdout(), SetForegroundColor(color), Print(text), ResetColor);
