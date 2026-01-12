@@ -12,7 +12,7 @@ mod web;
 
 use cli::banner::display_banner;
 use core::{config::Config, session::SessionManager};
-use shell::{ShellListener, ShellSessionManager, InteractiveTerminal};
+use shell::{ShellListener, ShellSessionManager, InteractiveTerminal, InterfaceSelector, get_port_input};
 use std::sync::Arc;
 
 #[derive(Parser)]
@@ -277,48 +277,31 @@ async fn main() -> Result<()> {
     let session_manager = SessionManager::new(config.clone());
 
     match cli.command {
-        // Default: Start listener
+        // Default: Start listener with interface selection
         None => {
-            let manager = Arc::new(ShellSessionManager::new());
-            let listener = ShellListener::new(manager.clone());
+            // Interactive interface selection
+            let mut selector = InterfaceSelector::new()?;
+            let host = selector.select().await?;
             
-            let host = "0.0.0.0".to_string();
-            let port = 4444;
+            // Interactive port input
+            let port = get_port_input()?;
             
-            // Start listener in background
-            let listen_host = host.clone();
-            tokio::spawn(async move {
-                if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
-                    eprintln!("[!] Shell listener error: {}", e);
-                }
-            });
-            
-            // Give listener time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            
-            // Start interactive terminal
-            let mut terminal = InteractiveTerminal::new(manager);
-            terminal.run().await?;
+            start_listener(host, port).await?;
         }
         
         Some(Commands::Listen { host, port }) => {
-            let manager = Arc::new(ShellSessionManager::new());
-            let listener = ShellListener::new(manager.clone());
-            
-            // Start listener in background
-            let listen_host = host.clone();
-            tokio::spawn(async move {
-                if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
-                    eprintln!("[!] Shell listener error: {}", e);
-                }
-            });
-            
-            // Give listener time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            
-            // Start interactive terminal
-            let mut terminal = InteractiveTerminal::new(manager);
-            terminal.run().await?;
+            // If host/port provided via CLI, skip interactive selection
+            if host == "0.0.0.0" && port == 4444 {
+                // Default values - show interactive selection
+                let mut selector = InterfaceSelector::new()?;
+                let selected_host = selector.select().await?;
+                let selected_port = get_port_input()?;
+                
+                start_listener(selected_host, selected_port).await?;
+            } else {
+                // Explicit values - use directly
+                start_listener(host, port).await?;
+            }
         }
         
         Some(Commands::Sessions) => {
@@ -455,6 +438,27 @@ async fn handle_sessions_list() -> Result<()> {
     
     println!();
     Ok(())
+}
+
+// Helper function to start listener
+async fn start_listener(host: String, port: u16) -> Result<()> {
+    let manager = Arc::new(ShellSessionManager::new());
+    let listener = ShellListener::new(manager.clone());
+    
+    // Start listener in background
+    let listen_host = host.clone();
+    tokio::spawn(async move {
+        if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
+            eprintln!("[!] Shell listener error: {}", e);
+        }
+    });
+    
+    // Give listener time to start
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    
+    // Start interactive terminal
+    let mut terminal = InteractiveTerminal::new(manager);
+    terminal.run().await
 }
 
 async fn handle_session_attach(_id: &str) -> Result<()> {
