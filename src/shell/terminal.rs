@@ -40,8 +40,29 @@ impl InteractiveTerminal {
         
         // Main loop: wait for session or show menu
         loop {
-            // Wait for a session to become active
+            // Wait for a session to become active OR show menu if we have backgrounded sessions
             let session = loop {
+                // Check if we have any backgrounded sessions - if so, show menu
+                if self.manager.session_count() > 0 {
+                    let active = self.manager.get_active_session().await;
+                    if active.is_none() {
+                        // We have sessions but none active - show menu
+                        let mut menu = MainMenu::new(self.manager.clone());
+                        match menu.run().await? {
+                            Some(session_id) => {
+                                // User selected a session - set it as active
+                                let _ = self.manager.set_active_session(&session_id).await;
+                                // Continue to wait for it to be active
+                            }
+                            None => {
+                                // User quit menu - show welcome banner and wait
+                                self.show_welcome_banner()?;
+                            }
+                        }
+                    }
+                }
+                
+                // Wait for active session
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 
                 if let Some(sess) = self.manager.get_active_session().await {
@@ -51,35 +72,24 @@ impl InteractiveTerminal {
                     }
                     break sess;
                 }
-                
-                // Check if we have any sessions (backgrounded)
-                if self.manager.session_count() > 0 {
-                    // Show menu
-                    let mut menu = MainMenu::new(self.manager.clone());
-                    if let Some(session_id) = menu.run().await? {
-                        // User selected a session - set it as active
-                        let _ = self.manager.set_active_session(&session_id).await;
-                        // Continue loop to wait for it to be active
-                    } else {
-                        // User quit menu - continue waiting
-                        self.show_welcome_banner()?;
-                    }
-                }
             };
             
             // Stabilization complete - now enter pure interactive mode
             match self.enter_interactive_mode(session).await? {
                 InteractionResult::Detached => {
-                    // User pressed Ctrl+D or Esc - return to menu
+                    // User pressed Esc - return to menu
                     let mut menu = MainMenu::new(self.manager.clone());
-                    if let Some(session_id) = menu.run().await? {
-                        // User selected a session - set it as active
-                        let _ = self.manager.set_active_session(&session_id).await;
-                        continue;
-                    } else {
-                        // User quit menu - show welcome and wait
-                        self.show_welcome_banner()?;
-                        continue;
+                    match menu.run().await? {
+                        Some(session_id) => {
+                            // User selected a session - set it as active
+                            let _ = self.manager.set_active_session(&session_id).await;
+                            continue;
+                        }
+                        None => {
+                            // User quit menu - show welcome and wait
+                            self.show_welcome_banner()?;
+                            continue;
+                        }
                     }
                 }
                 InteractionResult::SessionEnded => {
@@ -92,12 +102,17 @@ impl InteractiveTerminal {
     }
 
     fn show_welcome_banner(&self) -> Result<()> {
+        // Clear screen before showing banner
+        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        
         println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
         self.print_colored("◉  ", PRIMARY_COLOR);
         println!("{}", "Listening for incoming connections...".bright_white());
         println!("{}", "   Press Ctrl+C to stop listener".truecolor(120, 120, 130));
         println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
         println!();
+        
+        io::stdout().flush()?;
         Ok(())
     }
 
@@ -165,6 +180,9 @@ impl InteractiveTerminal {
         disable_raw_mode()?;
         self.reset_terminal_state()?;
         
+        // Clear screen before showing status message
+        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        
         if detach_requested {
             // Background the session
             let _ = self.manager.background_session(&session.id).await;
@@ -174,12 +192,22 @@ impl InteractiveTerminal {
             println!("{}", "Session backgrounded - returning to menu".truecolor(120, 120, 130));
             println!();
             
+            io::stdout().flush()?;
+            
+            // Brief pause so user sees the message
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
             Ok(InteractionResult::Detached)
         } else {
             println!();
             self.print_colored("◦  ", MUTED_COLOR);
             println!("{}", "Session ended".truecolor(120, 120, 130));
             println!();
+            
+            io::stdout().flush()?;
+            
+            // Brief pause so user sees the message
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
             Ok(InteractionResult::SessionEnded)
         }

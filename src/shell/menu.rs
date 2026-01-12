@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::*;
 use crossterm::{
     cursor, execute,
-    event::{self, Event, KeyCode, KeyEvent},
+    event::{self, Event, KeyCode},
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
 };
@@ -36,150 +36,172 @@ impl MainMenu {
     }
 
     pub async fn run(&mut self) -> Result<Option<String>> {
-        // Clear screen and show menu
-        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        
-        self.show_header()?;
-        
-        let sessions = self.get_session_list().await;
-        
-        if sessions.is_empty() {
-            println!();
-            self.print_colored("  ◦ ", MUTED_COLOR);
-            println!("{}", "No active sessions".truecolor(120, 120, 130));
-            println!();
-            println!("{}", "  Press 'q' to exit or Ctrl+C to stop listener".truecolor(120, 120, 130));
-            
-            // Wait for key
-            enable_raw_mode()?;
-            loop {
-                if event::poll(Duration::from_millis(100))? {
-                    if let Event::Key(key) = event::read()? {
-                        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
-                            disable_raw_mode()?;
-                            return Ok(None);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Interactive session selection
+        // Enable raw mode for menu
         enable_raw_mode()?;
-        let result = self.run_selector(sessions).await;
+        
+        let result = self.run_menu_loop().await;
+        
+        // Disable raw mode when leaving
         disable_raw_mode()?;
         
         result
     }
 
-    fn show_header(&self) -> Result<()> {
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
-        self.print_colored("  CAP ", PRIMARY_COLOR);
-        println!("{}", "Session Manager".bright_white());
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
-        println!();
-        Ok(())
-    }
-
-    async fn get_session_list(&self) -> Vec<SessionInfo> {
-        let mut sessions = Vec::new();
+    async fn run_menu_loop(&mut self) -> Result<Option<String>> {
+        let mut sessions = self.get_session_list().await;
         
-        for entry in self.manager.list_sessions() {
-            if let Some(session) = self.manager.get_session(&entry.0) {
-                let metadata = session.get_metadata().await;
-                let state = session.get_state().await;
-                
-                sessions.push(SessionInfo {
-                    id: entry.0.clone(),
-                    short_id: entry.0[..8].to_string(),
-                    remote_addr: metadata.remote_addr.clone(),
-                    hostname: metadata.hostname.clone(),
-                    username: metadata.username.clone(),
-                    os_type: metadata.os_type.clone(),
-                    state,
-                });
+        if sessions.is_empty() {
+            // No sessions - show message and wait
+            self.render_empty_screen()?;
+            
+            // Wait for key to exit
+            loop {
+                if event::poll(Duration::from_millis(100))? {
+                    if let Event::Key(key) = event::read()? {
+                        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                            return Ok(None);
+                        }
+                    }
+                }
             }
         }
         
-        sessions
-    }
-
-    async fn run_selector(&mut self, mut sessions: Vec<SessionInfo>) -> Result<Option<String>> {
-        self.selected = self.selected.min(sessions.len().saturating_sub(1));
+        // Initial render
+        self.render_menu(&sessions)?;
         
+        // Event loop - only redraw on actual user input
         loop {
-            // Move cursor to start of session list (after header)
-            execute!(io::stdout(), cursor::MoveTo(0, 5))?;
-            
-            // Display sessions
-            println!("{}", "  Active Sessions:".bright_white());
-            println!();
-            
-            for (idx, session) in sessions.iter().enumerate() {
-                self.draw_session_entry(session, idx == self.selected)?;
-            }
-            
-            println!();
-            println!("{}", "  Commands:".truecolor(120, 120, 130));
-            self.print_colored("    ↑↓", SECONDARY_COLOR);
-            print!(" Select  ");
-            self.print_colored("Enter", SECONDARY_COLOR);
-            print!(" Interact  ");
-            self.print_colored("K", SECONDARY_COLOR);
-            print!(" Kill  ");
-            self.print_colored("q/Esc", SECONDARY_COLOR);
-            print!(" Back");
-            println!();
-            println!();
-            
-            io::stdout().flush()?;
-            
-            if event::poll(Duration::from_millis(50))? {
-                if let Event::Key(key) = event::read()? {
-                    match key.code {
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if self.selected > 0 {
-                                self.selected -= 1;
+            if let Some(event) = self.wait_for_event().await? {
+                match event {
+                    MenuEvent::SelectNext => {
+                        if self.selected < sessions.len() - 1 {
+                            self.selected += 1;
+                            self.render_menu(&sessions)?;
+                        }
+                    }
+                    MenuEvent::SelectPrev => {
+                        if self.selected > 0 {
+                            self.selected -= 1;
+                            self.render_menu(&sessions)?;
+                        }
+                    }
+                    MenuEvent::Confirm => {
+                        return Ok(Some(sessions[self.selected].id.clone()));
+                    }
+                    MenuEvent::Kill => {
+                        // Kill selected session
+                        let session_id = &sessions[self.selected].id;
+                        let _ = self.manager.terminate_session(session_id).await;
+                        
+                        // Refresh session list
+                        sessions = self.get_session_list().await;
+                        if sessions.is_empty() {
+                            self.render_empty_screen()?;
+                            // Continue to wait for quit
+                            loop {
+                                if event::poll(Duration::from_millis(100))? {
+                                    if let Event::Key(key) = event::read()? {
+                                        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                                            return Ok(None);
+                                        }
+                                    }
+                                }
                             }
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if self.selected < sessions.len() - 1 {
-                                self.selected += 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            // Return selected session ID
-                            return Ok(Some(sessions[self.selected].id.clone()));
-                        }
-                        KeyCode::Char('K') => {
-                            // Kill session
-                            let session_id = &sessions[self.selected].id;
-                            let _ = self.manager.terminate_session(session_id).await;
-                            
-                            // Refresh sessions list
-                            execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-                            self.show_header()?;
-                            
-                            sessions = self.get_session_list().await;
-                            if sessions.is_empty() {
-                                return Ok(None);
-                            }
-                            self.selected = self.selected.min(sessions.len().saturating_sub(1));
-                            // Continue loop with new sessions list
-                        }
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            return Ok(None);
-                        }
-                        _ => {}
+                        
+                        // Adjust selection if needed
+                        self.selected = self.selected.min(sessions.len().saturating_sub(1));
+                        self.render_menu(&sessions)?;
+                    }
+                    MenuEvent::Quit => {
+                        return Ok(None);
                     }
                 }
             }
         }
     }
 
-    fn draw_session_entry(&self, session: &SessionInfo, is_selected: bool) -> Result<()> {
-        execute!(io::stdout(), Clear(ClearType::CurrentLine))?;
+    async fn wait_for_event(&self) -> Result<Option<MenuEvent>> {
+        // Block until we get a key event
+        if event::poll(Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                return Ok(match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => Some(MenuEvent::SelectPrev),
+                    KeyCode::Down | KeyCode::Char('j') => Some(MenuEvent::SelectNext),
+                    KeyCode::Enter => Some(MenuEvent::Confirm),
+                    KeyCode::Char('K') => Some(MenuEvent::Kill),
+                    KeyCode::Char('q') | KeyCode::Esc => Some(MenuEvent::Quit),
+                    _ => None,
+                });
+            }
+        }
+        Ok(None)
+    }
+
+    fn render_menu(&self, sessions: &[SessionInfo]) -> Result<()> {
+        // CRITICAL: Clear entire screen before rendering
+        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
         
+        // Render header
+        self.render_header()?;
+        
+        // Render session list
+        println!();
+        println!("{}", "  Active Sessions:".bright_white());
+        println!();
+        
+        for (idx, session) in sessions.iter().enumerate() {
+            self.render_session_line(session, idx == self.selected)?;
+        }
+        
+        // Render footer
+        println!();
+        self.render_footer()?;
+        
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    fn render_empty_screen(&self) -> Result<()> {
+        // CRITICAL: Clear entire screen before rendering
+        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        
+        self.render_header()?;
+        
+        println!();
+        self.print_colored("  ◦ ", MUTED_COLOR);
+        println!("{}", "No active sessions".truecolor(120, 120, 130));
+        println!();
+        println!("{}", "  Press 'q' to exit or wait for incoming connections".truecolor(120, 120, 130));
+        
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    fn render_header(&self) -> Result<()> {
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        self.print_colored("  CAP ", PRIMARY_COLOR);
+        println!("{}", "Session Manager".bright_white());
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        Ok(())
+    }
+
+    fn render_footer(&self) -> Result<()> {
+        println!("{}", "  Commands:".truecolor(120, 120, 130));
+        self.print_colored("    ↑↓", SECONDARY_COLOR);
+        print!(" Select  ");
+        self.print_colored("Enter", SECONDARY_COLOR);
+        print!(" Interact  ");
+        self.print_colored("K", SECONDARY_COLOR);
+        print!(" Kill  ");
+        self.print_colored("q/Esc", SECONDARY_COLOR);
+        print!(" Back");
+        println!();
+        Ok(())
+    }
+
+    fn render_session_line(&self, session: &SessionInfo, is_selected: bool) -> Result<()> {
+        // Selection indicator
         if is_selected {
             self.print_colored("  ▸ ", PRIMARY_COLOR);
         } else {
@@ -227,9 +249,39 @@ impl MainMenu {
         }
         
         println!();
-        
         Ok(())
     }
+
+    async fn get_session_list(&self) -> Vec<SessionInfo> {
+        let mut sessions = Vec::new();
+        
+        for entry in self.manager.list_sessions() {
+            if let Some(session) = self.manager.get_session(&entry.0) {
+                let metadata = session.get_metadata().await;
+                let state = session.get_state().await;
+                
+                sessions.push(SessionInfo {
+                    id: entry.0.clone(),
+                    short_id: entry.0[..8].to_string(),
+                    remote_addr: metadata.remote_addr.clone(),
+                    hostname: metadata.hostname.clone(),
+                    username: metadata.username.clone(),
+                    os_type: metadata.os_type.clone(),
+                    state,
+                });
+            }
+        }
+        
+        sessions
+    }
+}
+
+enum MenuEvent {
+    SelectNext,
+    SelectPrev,
+    Confirm,
+    Kill,
+    Quit,
 }
 
 #[derive(Clone)]
