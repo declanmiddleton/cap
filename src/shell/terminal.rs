@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use super::session::ShellSessionManager;
 use super::menu::MainMenu;
+use super::formatting::{get_safe_width, horizontal_line};
 
 const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };
 const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };
@@ -165,11 +166,14 @@ impl InteractiveTerminal {
         // Clear screen before showing banner
         execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
         
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        let width = get_safe_width();
+        let separator = horizontal_line(width.min(80), '━');
+        
+        println!("{}", separator.truecolor(37, 150, 190));
         self.print_colored("◉  ", PRIMARY_COLOR);
         println!("{}", "Listening for incoming connections...".bright_white());
         println!("{}", "   Press Ctrl+C to stop listener".truecolor(120, 120, 130));
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!("{}", separator.truecolor(37, 150, 190));
         println!();
         
         io::stdout().flush()?;

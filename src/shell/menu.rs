@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::session::{ShellSessionManager, ShellState};
+use super::formatting::{get_safe_width, constrain_line, truncate_text, horizontal_line};
 
 const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };
 const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };
@@ -179,10 +180,13 @@ impl MainMenu {
     }
 
     fn render_header(&self) -> Result<()> {
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        let width = get_safe_width();
+        let separator = horizontal_line(width.min(80), '━');
+        
+        println!("{}", separator.truecolor(37, 150, 190));
         self.print_colored("  CAP ", PRIMARY_COLOR);
         println!("{}", "Session Manager".bright_white());
-        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!("{}", separator.truecolor(37, 150, 190));
         Ok(())
     }
 
@@ -201,22 +205,70 @@ impl MainMenu {
     }
 
     fn render_session_line(&self, session: &SessionInfo, is_selected: bool) -> Result<()> {
-        // Selection indicator
+        let width = get_safe_width();
+        
+        // Build the line components
+        let mut line = String::new();
+        
+        // Selection indicator (4 chars)
+        let indicator = if is_selected { "  ▸ " } else { "    " };
+        line.push_str(indicator);
+        
+        // Session ID (12 chars: <8chars>)
+        let session_id = format!("<{}>", session.short_id);
+        line.push_str(&session_id);
+        
+        // Status (varies, but typically ~15 chars)
+        let status = match session.state {
+            ShellState::Active => " [Active]",
+            ShellState::Background => " [Background]",
+            ShellState::Terminated => " [Terminated]",
+        };
+        line.push_str(status);
+        
+        // Remote address
+        line.push_str(" from ");
+        line.push_str(&session.remote_addr);
+        
+        // Metadata (if space permits)
+        if let Some(ref user) = session.username {
+            let user_info = format!(" - {}", user);
+            if let Some(ref host) = session.hostname {
+                let full_info = format!("{}@{}", user_info, host);
+                if line.len() + full_info.len() < width {
+                    line.push_str(&full_info);
+                } else if line.len() + user_info.len() < width {
+                    line.push_str(&user_info);
+                }
+            } else if line.len() + user_info.len() < width {
+                line.push_str(&user_info);
+            }
+        }
+        
+        if let Some(ref os) = session.os_type {
+            let os_info = format!(" ({})", os);
+            if line.len() + os_info.len() < width {
+                line.push_str(&os_info);
+            }
+        }
+        
+        // Constrain and colorize
+        let constrained = constrain_line(&line, width);
+        
+        // Now print with colors
         if is_selected {
             self.print_colored("  ▸ ", PRIMARY_COLOR);
         } else {
             print!("    ");
         }
         
-        // Session ID
         if is_selected {
             self.print_colored(&format!("<{}>", session.short_id), SECONDARY_COLOR);
         } else {
             print!("{}", format!("<{}>", session.short_id).truecolor(100, 100, 110));
         }
         
-        // Status
-        let status_str = match session.state {
+        let status_colored = match session.state {
             ShellState::Active => {
                 if is_selected {
                     format!(" [{}]", "Active".bright_green())
@@ -231,21 +283,29 @@ impl MainMenu {
                 format!(" [{}]", "Terminated".truecolor(200, 80, 80))
             }
         };
-        print!("{}", status_str);
+        print!("{}", status_colored);
         
-        // Remote address
         print!(" from {}", session.remote_addr.bright_white());
         
-        // Metadata
-        if let Some(ref user) = session.username {
-            print!(" - {}", user.bright_cyan());
-            if let Some(ref host) = session.hostname {
-                print!("@{}", host.bright_cyan());
-            }
-        }
+        // Calculate remaining width for metadata
+        let base_len = 4 + 12 + status.len() + 6 + session.remote_addr.len();
+        let remaining = if width > base_len { width - base_len } else { 0 };
         
-        if let Some(ref os) = session.os_type {
-            print!(" ({})", os.truecolor(120, 120, 130));
+        if remaining > 10 {
+            if let Some(ref user) = session.username {
+                print!(" - {}", user.bright_cyan());
+                if let Some(ref host) = session.hostname {
+                    if remaining > 20 + user.len() {
+                        print!("@{}", host.bright_cyan());
+                    }
+                }
+            }
+            
+            if let Some(ref os) = session.os_type {
+                if remaining > 30 {
+                    print!(" ({})", os.truecolor(120, 120, 130));
+                }
+            }
         }
         
         println!();

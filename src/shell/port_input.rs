@@ -8,6 +8,8 @@ use crossterm::{
 };
 use std::io::{self, Write};
 
+use super::formatting::{get_safe_width, horizontal_line};
+
 const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };
 const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };
 const MUTED_COLOR: Color = Color::Rgb { r: 120, g: 120, b: 130 };
@@ -18,11 +20,14 @@ fn print_colored(text: &str, color: Color) {
 }
 
 pub fn get_port_input() -> Result<u16> {
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+    let width = get_safe_width();
+    let separator = horizontal_line(width.min(80), '━');
+    
+    println!("{}", separator.truecolor(37, 150, 190));
     print_colored("  Port Configuration", PRIMARY_COLOR);
     println!();
     println!("{}", "  Type port number · Enter to confirm · Ctrl+C to cancel".truecolor(120, 120, 130));
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+    println!("{}", separator.truecolor(37, 150, 190));
     println!();
     
     print_colored("  ◉ Port: ", PRIMARY_COLOR);
@@ -41,7 +46,10 @@ pub fn get_port_input() -> Result<u16> {
                     KeyCode::Enter => {
                         disable_raw_mode()?;
                         println!();
-                        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+                        
+                        let width = get_safe_width();
+                        let separator = horizontal_line(width.min(80), '━');
+                        println!("{}", separator.truecolor(37, 150, 190));
                         println!();
                         
                         match input.parse::<u16>() {
