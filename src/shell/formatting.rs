@@ -160,6 +160,11 @@ pub fn horizontal_line(width: usize, ch: char) -> String {
     ch.to_string().repeat(width)
 }
 
+/// Alias for wrap_text for compatibility
+pub fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
+    wrap_text(text, max_width)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

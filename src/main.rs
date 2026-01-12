@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod cli;
@@ -585,7 +584,7 @@ async fn handle_shell_action(action: ShellAction) -> Result<()> {
             }
             println!();
         }
-        ShellAction::Interact { id } => {
+        ShellAction::Interact { id: _ } => {
             println!();
             println!("{} To interact with shell sessions:", "[*]".bright_cyan());
             println!("{}   Run: {}", "›".bright_black(), "cap listen".cyan());

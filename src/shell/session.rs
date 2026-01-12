@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use std::net::SocketAddr;
@@ -56,7 +56,7 @@ impl ShellSession {
         remote_addr: SocketAddr,
         stream: TcpStream,
     ) -> Result<Self> {
-        let (input_tx, mut input_rx) = mpsc::unbounded_channel::<String>();
+        let (input_tx, input_rx) = mpsc::unbounded_channel::<String>();
         let (output_tx, output_rx) = mpsc::unbounded_channel::<String>();
 
         let metadata = ShellMetadata {
@@ -529,6 +529,10 @@ impl ShellSessionManager {
 
     pub fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    pub fn get_session_id_by_index(&self, index: usize) -> Option<String> {
+        self.sessions.iter().nth(index).map(|entry| entry.key().clone())
     }
 
     async fn stabilize_shell(session: Arc<ShellSession>) {
