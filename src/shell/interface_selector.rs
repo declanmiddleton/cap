@@ -29,22 +29,46 @@ impl InterfaceSelector {
     }
 
     fn get_network_interfaces() -> Result<Vec<(String, IpAddr)>> {
-        use std::net::UdpSocket;
-        
         let mut interfaces = Vec::new();
         
+        // Always add "all interfaces" option first
         interfaces.push(("all interfaces".to_string(), "0.0.0.0".parse()?));
-        interfaces.push(("localhost".to_string(), "127.0.0.1".parse()?));
         
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect("8.8.8.8:80").is_ok() {
-                if let Ok(addr) = socket.local_addr() {
-                    let ip = addr.ip();
-                    if !ip.is_loopback() && !ip.to_string().starts_with("0.0.0.0") {
-                        interfaces.push(("primary".to_string(), ip));
-                    }
+        // Enumerate ALL network interfaces using if-addrs
+        if let Ok(addrs) = if_addrs::get_if_addrs() {
+            for iface in addrs {
+                let ip = iface.addr.ip();
+                
+                // Skip IPv6 for now (can be added later)
+                if ip.is_ipv6() {
+                    continue;
+                }
+                
+                // Categorize interfaces
+                let name = if ip.is_loopback() {
+                    format!("localhost ({})", iface.name)
+                } else if iface.name.starts_with("tun") || iface.name.starts_with("tap") {
+                    format!("vpn/{} ({})", iface.name, determine_vpn_type(&iface.name))
+                } else if iface.name.starts_with("eth") || iface.name.starts_with("en") {
+                    format!("ethernet ({})", iface.name)
+                } else if iface.name.starts_with("wl") || iface.name.starts_with("wi") {
+                    format!("wireless ({})", iface.name)
+                } else if iface.name.starts_with("docker") || iface.name.starts_with("br-") {
+                    format!("docker ({})", iface.name)
+                } else {
+                    format!("{}", iface.name)
+                };
+                
+                // Avoid duplicates
+                if !interfaces.iter().any(|(_, existing_ip)| existing_ip == &ip) {
+                    interfaces.push((name, ip));
                 }
             }
+        }
+        
+        // If no interfaces found (fallback), add localhost
+        if interfaces.len() == 1 {
+            interfaces.push(("localhost".to_string(), "127.0.0.1".parse()?));
         }
         
         Ok(interfaces)
@@ -62,7 +86,9 @@ impl InterfaceSelector {
         self.print_colored("Tab", SECONDARY_COLOR);
         print!(" to select · ");
         self.print_colored("Enter", SECONDARY_COLOR);
-        print!(" to confirm\n\n");
+        print!(" to confirm · ");
+        self.print_colored("Ctrl+C", MUTED_COLOR);
+        print!(" to cancel\n\n");
         
         enable_raw_mode()?;
         let result = self.run_selector().await;
@@ -82,11 +108,11 @@ impl InterfaceSelector {
                 
                 if idx == self.selected {
                     self.print_colored("  ◉ ", PRIMARY_COLOR);
-                    self.print_colored(&format!("{:15}", name), PRIMARY_COLOR);
+                    self.print_colored(&format!("{:35}", name), PRIMARY_COLOR);
                     self.print_colored(&format!("{}", ip), SECONDARY_COLOR);
                 } else {
                     self.print_colored("  ◦ ", MUTED_COLOR);
-                    print!("{:15}", name.truecolor(100, 100, 110));
+                    print!("{:35}", name.truecolor(100, 100, 110));
                     print!("{}", ip.to_string().truecolor(80, 80, 90));
                 }
                 println!();
@@ -134,5 +160,19 @@ impl InterfaceSelector {
                 }
             }
         }
+    }
+}
+
+fn determine_vpn_type(iface_name: &str) -> &str {
+    if iface_name.contains("tun") {
+        if iface_name.contains("0") || iface_name == "tun0" {
+            "openvpn"
+        } else {
+            "tunnel"
+        }
+    } else if iface_name.contains("tap") {
+        "tap"
+    } else {
+        "vpn"
     }
 }

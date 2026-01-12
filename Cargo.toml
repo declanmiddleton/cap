@@ -35,6 +35,9 @@ crossterm = "0.28"
 ratatui = "0.29"
 bytes = "1.10"
 urlencoding = "2.1"
+if-addrs = "0.13"
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
 [dev-dependencies]
 mockito = "1.2"

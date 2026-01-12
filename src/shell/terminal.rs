@@ -103,10 +103,6 @@ impl InteractiveTerminal {
                     // Check for new sessions
                     let session_count = self.manager.session_count();
                     if session_count != last_session_count {
-                        if session_count > last_session_count {
-                            // New session - pulse animation
-                            self.show_session_capture_animation().await?;
-                        }
                         last_session_count = session_count;
                     }
 
@@ -117,22 +113,33 @@ impl InteractiveTerminal {
                         // Check if session is disconnected but being kept alive
                         if state == super::session::ShellState::Background {
                             if in_session {
-                                self.show_reconnection_shimmer().await?;
+                                println!();
+                                self.print_colored("⚠ ", WARNING_COLOR);
+                                println!("Connection lost - session backgrounded");
+                                println!();
+                                in_session = false;
                             }
                         } else if !in_session {
                             in_session = true;
-                            self.show_session_connected_animation().await?;
+                            
+                            // Show session info when first connected
+                            let metadata = session.get_metadata().await;
+                            println!();
+                            self.print_colored("✓ ", SUCCESS_COLOR);
+                            println!("Interacting with Session <{}>", &session.id[..8].truecolor(86, 33, 213));
+                            if let Some(ref os) = metadata.os_type {
+                                println!("   OS: {}", os.bright_cyan());
+                            }
+                            if let Some(ref user) = metadata.username {
+                                println!("   User: {}", user.bright_cyan());
+                            }
+                            println!();
                         }
                         
                         let mut output_rx = session.output_rx.write().await;
                         while let Ok(line) = output_rx.try_recv() {
                             print!("{}", line);
                             io::stdout().flush()?;
-                        }
-                        
-                        // Show persistent prompt with session context only if active
-                        if state == super::session::ShellState::Active {
-                            self.show_session_prompt(&session).await?;
                         }
                     } else if in_session {
                         in_session = false;
@@ -325,60 +332,80 @@ impl InteractiveTerminal {
     async fn handle_key_event(&mut self, key: crossterm::event::KeyEvent, input: &mut String) -> Result<()> {
         if let Some(session) = self.manager.get_active_session().await {
             match key.code {
+                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    match c {
+                        'd' => {
+                            // Detach (special CAP command)
+                            println!();
+                            self.print_colored("◦ ", MUTED_COLOR);
+                            println!("Detached from session");
+                            self.should_exit = true;
+                        }
+                        'c' => {
+                            // Send Ctrl+C directly to shell
+                            session.send_command("\x03".to_string()).await?;
+                            input.clear();
+                        }
+                        'z' => {
+                            // Send Ctrl+Z directly to shell
+                            session.send_command("\x1a".to_string()).await?;
+                        }
+                        _ => {
+                            // Pass other Ctrl combinations through
+                            let ctrl_char = (c as u8 & 0x1f) as char;
+                            session.send_command(ctrl_char.to_string()).await?;
+                        }
+                    }
+                }
                 KeyCode::Enter => {
-                    println!();
+                    // Send command to shell
                     let command = format!("{}\n", input);
                     session.send_command(command).await?;
                     input.clear();
                 }
                 KeyCode::Char(c) => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        match c {
-                            'd' => {
-                                // Detach
-                                println!();
-                                self.print_colored("◦ ", MUTED_COLOR);
-                                println!("Detached");
-                                self.should_exit = true;
-                            }
-                            'c' => {
-                                // Send Ctrl+C to shell
-                                session.send_command("\x03".to_string()).await?;
-                            }
-                            'l' => {
-                                // List sessions
-                                self.list_sessions().await?;
-                            }
-                            'n' => {
-                                // Add note
-                                self.add_session_note(&session).await?;
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        input.push(c);
-                        print!("{}", c);
-                        io::stdout().flush()?;
-                    }
+                    // Regular character - send to shell and echo locally
+                    input.push(c);
+                    session.send_command(c.to_string()).await?;
                 }
                 KeyCode::Backspace => {
+                    // Send backspace to shell
                     if !input.is_empty() {
                         input.pop();
-                        print!("\x08 \x08");
-                        io::stdout().flush()?;
                     }
+                    session.send_command("\x08".to_string()).await?;
+                }
+                KeyCode::Tab => {
+                    // Send tab for auto-completion
+                    session.send_command("\t".to_string()).await?;
+                }
+                KeyCode::Up => {
+                    // Send up arrow
+                    session.send_command("\x1b[A".to_string()).await?;
+                }
+                KeyCode::Down => {
+                    // Send down arrow
+                    session.send_command("\x1b[B".to_string()).await?;
+                }
+                KeyCode::Left => {
+                    // Send left arrow
+                    session.send_command("\x1b[D".to_string()).await?;
+                }
+                KeyCode::Right => {
+                    // Send right arrow
+                    session.send_command("\x1b[C".to_string()).await?;
                 }
                 KeyCode::Esc => {
                     // Background session
                     println!();
                     self.print_colored("◦ ", MUTED_COLOR);
-                    println!("Session backgrounded");
+                    println!("Session backgrounded (use 'cap attach <id>' to reconnect)");
                     self.manager.background_session(&session.id).await?;
                 }
                 _ => {}
             }
         } else {
-            // No active session - handle commands
+            // No active session - handle menu commands
             match key.code {
                 KeyCode::Char('q') | KeyCode::Char('Q') => {
                     self.should_exit = true;
