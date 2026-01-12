@@ -186,12 +186,11 @@ impl InteractiveTerminal {
             }
         });
         
-        // STEP 1: Save current terminal settings and enter raw mode
-        use std::os::fd::AsFd;
+        // CRITICAL: Save terminal state BEFORE entering raw mode
         let stdin = io::stdin();
         let original_termios = termios::tcgetattr(&stdin)?;
         
-        // Configure raw mode manually (like cfmakeraw)
+        // Configure raw mode (like Penelope's tty.setraw)
         let mut raw_termios = original_termios.clone();
         
         // Input flags: no break, no CR to NL, no parity check, no strip char, no start/stop output control
@@ -208,84 +207,112 @@ impl InteractiveTerminal {
         raw_termios.local_flags &= !(LocalFlags::ECHO | LocalFlags::ICANON | LocalFlags::IEXTEN | 
                                       LocalFlags::ISIG);
         
-        // Set raw mode NOW
+        // Apply raw mode
         termios::tcsetattr(&stdin, SetArg::TCSANOW, &raw_termios)?;
         
-        // STEP 2: Run passthrough loop (tokio::io::stdin is already non-blocking)
-        let result = self.run_passthrough_loop(session.clone()).await;
+        // STEP 2: Spawn BLOCKING thread for terminal I/O (like Penelope)
+        // This is critical - terminal I/O must be synchronous, not async
+        let result = self.run_passthrough_blocking(session.clone()).await;
         
-        // STEP 3: Restore terminal settings (always, even on error)
+        // STEP 3: ALWAYS restore terminal (even on panic/error)
         termios::tcsetattr(&stdin, SetArg::TCSANOW, &original_termios)?;
         
         result
     }
     
-    /// TRUE PASSTHROUGH LOOP - async stdin/stdout bridging
-    async fn run_passthrough_loop(
+    /// BLOCKING PASSTHROUGH LOOP - Penelope-style synchronous I/O
+    /// Runs stdin reading in a dedicated blocking thread
+    async fn run_passthrough_blocking(
         &mut self, 
         session: Arc<super::session::ShellSession>,
     ) -> Result<InteractionResult> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use std::io::Read;
+        use tokio::sync::mpsc;
         
-        let mut stdin_buffer = [0u8; 1];  // Read one byte at a time for immediate forwarding
-        let mut esc_buffer = Vec::new();
-        let mut esc_timer = std::time::Instant::now();
-        let esc_timeout = Duration::from_millis(100);
+        // Channels for communication between blocking thread and async runtime
+        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (detach_tx, mut detach_rx) = mpsc::unbounded_channel::<()>();
         
-        let mut stdin = tokio::io::stdin();
-        let mut stdout = tokio::io::stdout();
+        // Spawn BLOCKING thread for stdin reading
+        // This is the Penelope way - synchronous, blocking I/O for terminal
+        std::thread::spawn(move || {
+            let mut stdin = io::stdin();
+            let mut buffer = [0u8; 1];
+            let mut esc_buffer = Vec::new();
+            let mut last_read = std::time::Instant::now();
+            let esc_timeout = Duration::from_millis(100);
+            
+            loop {
+                // Blocking read - this is correct for terminals
+                match stdin.read(&mut buffer) {
+                    Ok(0) => break,  // EOF
+                    Ok(_) => {
+                        let byte = buffer[0];
+                        let now = std::time::Instant::now();
+                        
+                        // Check for bare Esc (detachment)
+                        if byte == 0x1b && esc_buffer.is_empty() {
+                            esc_buffer.push(0x1b);
+                            last_read = now;
+                            continue;
+                        }
+                        
+                        // If we have a pending Esc, check timing
+                        if !esc_buffer.is_empty() {
+                            if now.duration_since(last_read) > esc_timeout {
+                                // Bare Esc detected - signal detachment
+                                let _ = detach_tx.send(());
+                                break;
+                            } else {
+                                // Part of escape sequence - add to buffer
+                                esc_buffer.push(byte);
+                                
+                                // If escape sequence looks complete, send it
+                                if esc_buffer.len() >= 3 {
+                                    let _ = stdin_tx.send(esc_buffer.clone());
+                                    esc_buffer.clear();
+                                }
+                                last_read = now;
+                                continue;
+                            }
+                        }
+                        
+                        // Normal byte - forward immediately
+                        let _ = stdin_tx.send(vec![byte]);
+                        last_read = now;
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        
+        // Main async loop: forward stdin to session, pump output to stdout
+        let mut stdout = io::stdout();
         
         loop {
             tokio::select! {
-                // STEP 1: Read from stdin (one byte at a time for immediate forwarding)
-                result = stdin.read(&mut stdin_buffer) => {
-                    match result {
-                        Ok(0) => break,  // EOF
-                        Ok(n) => {
-                            let byte = stdin_buffer[0];
-                            
-                            // Esc detection for detachment
-                            if byte == 0x1b {
-                                if esc_buffer.is_empty() {
-                                    // First Esc byte
-                                    esc_buffer.push(0x1b);
-                                    esc_timer = std::time::Instant::now();
-                                    continue;
-                                }
-                            }
-                            
-                            // If we had an Esc waiting and got more bytes, it's an escape sequence
-                            if !esc_buffer.is_empty() {
-                                // Not bare Esc - it's an escape sequence, forward it
-                                esc_buffer.push(byte);
-                                session.write_raw_bytes(&esc_buffer).await?;
-                                esc_buffer.clear();
-                                continue;
-                            }
-                            
-                            // Normal input - forward directly
-                            session.write_raw_bytes(&stdin_buffer[..n]).await?;
-                        }
-                        Err(_) => break,
+                // Forward stdin bytes to session
+                Some(bytes) = stdin_rx.recv() => {
+                    if let Err(_) = session.write_raw_bytes(&bytes).await {
+                        break;  // Session died
                     }
                 }
                 
-                // Check if bare Esc timed out → detach
-                _ = tokio::time::sleep(Duration::from_millis(10)), if !esc_buffer.is_empty() && esc_timer.elapsed() > esc_timeout => {
+                // Check for detachment signal
+                Some(_) = detach_rx.recv() => {
                     let _ = self.manager.background_session(&session.id).await;
                     return Ok(InteractionResult::Detached);
                 }
                 
-                // STEP 2: Check for session output
+                // Pump session output to stdout
                 _ = tokio::time::sleep(Duration::from_millis(1)) => {
                     if self.mode == TerminalMode::SessionActive {
                         let mut output_rx = session.output_rx.write().await;
                         
                         // Drain all available output
                         while let Ok(output) = output_rx.try_recv() {
-                            // Write directly to stdout
-                            stdout.write_all(output.as_bytes()).await?;
-                            stdout.flush().await?;
+                            stdout.write_all(output.as_bytes())?;
+                            stdout.flush()?;
                         }
                     }
                     
