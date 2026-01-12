@@ -1,6 +1,6 @@
 # CAP
 
-**Central Access Point** — A streamlined shell management and post-exploitation tool built for efficiency.
+**Central Access Point** — A modern reverse shell handler built for reliability, clarity, and flow.
 
 <img width="1056" height="357" alt="CAP Banner" src="https://github.com/user-attachments/assets/d2359001-218c-47f1-aa99-a00432006854" />
 
@@ -8,39 +8,39 @@
 
 ## What is CAP?
 
-CAP (Central Access Point) is a **practical penetration testing tool** designed to save time during engagements by simplifying common post-exploitation tasks. It's not a framework—it's a focused utility that handles the tedious work so you can focus on the assessment.
+CAP is a **terminal-based reverse shell handler** that makes remote interaction feel stable, calm, and local. It strips away unnecessary complexity, focusing entirely on session capture, management, and transparent interaction.
 
-### Why CAP?
+### Design Philosophy
 
-Stop wasting time on:
-- Upgrading basic shells manually
-- Managing multiple reverse shell sessions across tabs
-- Copy-pasting privilege escalation commands
-- Switching between scattered tools for enumeration
-- Losing context when you background a session
+**Shell-first.** CAP is intentionally narrow in scope—it's a listener and session manager, not a full framework. Once a connection is received, the shell is immediately stabilized and made interactive with consistent input/output behavior.
 
-CAP consolidates these workflows into a single, efficient interface.
+**Clarity over clutter.** No modes, no menus you don't need, no command-heavy workflows. Interaction begins directly in the shell and remains uninterrupted. Sessions maintain continuous context—target identity, privilege level, session age, and operator notes—always visible, never hidden.
+
+**Built to disappear.** Shell detection, stabilization, reconnection, and recovery happen automatically and silently. The tool gets out of your way so you can focus on the engagement, not the tool itself.
 
 ---
 
 ## Key Features
 
-### 🎯 **Shell Management**
-- **Interactive listener** with clean, guided setup
-- **Multi-session handling** — run, background, attach, and switch between shells seamlessly
-- **Persistent context** — see target info, privilege level, and session age at a glance
-- **Session notes** — annotate shells with custom metadata for tracking
+### 🎯 **Modern Shell Management**
+- **Interactive listener** with guided interface and port selection
+- **Multi-session handling** — capture, background, attach, and switch between shells seamlessly
+- **Persistent context** — target hostname, username, privilege level, and session age displayed in every prompt
+- **Session notes** — annotate shells for tracking and organization
+- **Graceful recovery** — sessions survive disconnects and attempt automatic reconnection
 
-### 🔧 **Built-in Capabilities**
-- **Privilege escalation helpers** — common techniques ready to deploy
-- **Web vulnerability testing** — SQL injection, SSTI detection, and fingerprinting
-- **Network enumeration** — port scanning and DNS discovery
-- **Audit logging** — all actions logged with timestamps for reporting
+### ⚡ **True Terminal Passthrough**
+- **Byte-for-byte forwarding** — keystrokes sent as raw bytes, zero interpretation
+- **Async I/O** — concurrent stdin/stdout processing with tokio
+- **Raw mode** — character-by-character input, remote shell handles line editing
+- **No local echo** — remote shell provides echo for natural behavior
+- **Full PTY support** — arrow keys, backspace, Ctrl+C, tab completion all work correctly
 
-### ⚡ **Time-Saving Design**
-- **Single binary** — no dependencies, no installation scripts
-- **Scope enforcement** — stay within authorized targets
-- **Fast workflows** — everything accessible from one interface
+### 🎨 **Restrained, Modern Interface**
+- **Two-color system** — `#2596be` (primary) and `#5621d5` (secondary) for consistent, calm aesthetics
+- **Subtle animations** — brief feedback for state changes without distraction
+- **Terminal-aware rendering** — dynamic width detection, smart text wrapping, no overflow
+- **Clean state management** — strict separation between listener, menu, and interactive shell modes
 
 ---
 
@@ -59,14 +59,17 @@ cd cap
 cargo build --release
 
 # Run CAP
-./target/release/cap --help
+./target/release/cap
 ```
 
 ### Basic Usage
 
 ```bash
-# Start a listener (interactive setup)
-cap listen
+# Start listener (interactive setup - default)
+cap
+
+# Or specify host and port directly
+cap listen --host 10.10.14.5 --port 4444
 
 # List active sessions
 cap sessions
@@ -81,6 +84,41 @@ cap note <session-id> "Domain Admin shell - DC01"
 cap kill <session-id>
 ```
 
+### Interactive Mode
+
+Once a session is captured:
+
+- **Type naturally** — commands assemble character-by-character
+- **Press Enter** to execute
+- **Press Esc** to detach and return to menu (session stays alive)
+- **Ctrl+C, Ctrl+Z, etc.** are forwarded to the remote shell
+
+Sessions display persistent metadata:
+```
+nibbler@Nibbles (user, 2m 34s) [Active] # whoami
+```
+
+---
+
+## How It Works
+
+### Connection Flow
+
+1. **Listener starts** — select interface and port via interactive prompt
+2. **Connection received** — session captured and registered
+3. **Automatic stabilization** — OS detection, user enumeration, PTY upgrade (silent)
+4. **Interactive mode** — true terminal passthrough with raw mode enabled
+5. **Detach with Esc** — session backgrounds, remains alive for re-attachment
+
+### Technical Architecture
+
+- **Tokio async runtime** — non-blocking I/O for concurrent session handling
+- **Raw termios control** — manual raw mode setup for proper character forwarding
+- **TCP passthrough** — direct stdin → socket → stdout bridging
+- **State machine** — strict terminal ownership (Listening, InMenu, InShell)
+- **Alternate screen** — menu rendered on alternate buffer, session screen preserved
+- **Session persistence** — metadata saved to `shell_sessions.json`
+
 ---
 
 ## Platform Support
@@ -89,7 +127,7 @@ cap kill <session-id>
 |----------|--------|-------|
 | **Linux** | ✅ Fully supported | Debian, Ubuntu, Arch, Kali, Parrot |
 | **macOS** | ✅ Fully supported | Apple Silicon & Intel |
-| **Windows** | ✅ Fully supported | MSVC toolchain required |
+| **Windows** | ⚠️ Partial | Terminal features limited by Windows PTY support |
 
 ### Building for Linux (Static Binary)
 
@@ -114,10 +152,10 @@ This creates a standalone executable with no runtime dependencies.
 
 CAP is designed for **authorized security assessments** including:
 
-- 🔴 **Penetration Testing** — streamline post-exploitation and enumeration
-- 🟣 **Red Team Operations** — manage multiple access points efficiently
-- 🔵 **Blue Team Validation** — test detection and response capabilities
-- 🧪 **Security Research** — rapid prototyping and testing
+- 🔴 **Penetration Testing** — reliable shell management during assessments
+- 🟣 **Red Team Operations** — maintain access with stable, recoverable sessions
+- 🔵 **Blue Team Validation** — test detection capabilities
+- 🧪 **Security Research** — rapid shell interaction and experimentation
 - 🎓 **Training & Labs** — educational environments and CTFs
 
 ---
@@ -125,25 +163,63 @@ CAP is designed for **authorized security assessments** including:
 ## What CAP Is Not
 
 CAP is **not**:
-- ❌ A malware framework
+- ❌ A full C2 framework (use Metasploit, Sliver, Empire for that)
+- ❌ A post-exploitation module platform
 - ❌ An evasion toolkit
-- ❌ A general-purpose C2 system
 - ❌ Designed for unauthorized access
+
+**CAP is a reverse shell handler.** It captures connections, stabilizes shells, and provides a clean interface for interaction. Complexity is intentionally minimal.
 
 **Use responsibly.** CAP is intended for authorized engagements only. Users are responsible for compliance with applicable laws and regulations.
 
 ---
 
-## Design Philosophy
+## Technical Details
 
-**Simplicity over complexity** — CAP does a few things well instead of trying to be everything.
+### Dependencies
 
-- **Shell-first** — built around the reality of post-exploitation work
-- **Fast workflows** — reduce friction and context-switching
-- **Transparent operations** — audit logs and scope controls built-in
-- **Self-contained** — single binary, minimal configuration
+```toml
+tokio = "1.35"           # Async runtime
+crossterm = "0.28"       # Terminal control
+nix = "0.27"             # UNIX termios, raw mode
+colored = "2.1"          # Terminal colors
+chrono = "0.4"           # Timestamps
+dashmap = "5.5"          # Concurrent session map
+uuid = "1.6"             # Session IDs
+```
 
-CAP is written in Rust for memory safety, performance, and reliability. It produces a single static binary with no runtime dependencies.
+### Architecture Highlights
+
+- **Async stdin/stdout** — `tokio::io::stdin()` and `tokio::io::stdout()` for proper async I/O
+- **Raw byte forwarding** — `write_raw_bytes()` bypasses command processing
+- **Enter sends `\r` only** — remote shell handles line discipline
+- **Terminal state restoration** — termios settings always restored on exit
+- **Concurrent I/O** — `tokio::select!` enables simultaneous stdin read and stdout write
+
+### Why Rust?
+
+- **Memory safety** — no buffer overflows, use-after-free, or data races
+- **Performance** — zero-cost abstractions, compiled binary
+- **Concurrency** — tokio provides robust async I/O
+- **Single binary** — static linking produces standalone executable
+- **Reliability** — strong type system catches bugs at compile time
+
+---
+
+## Comparison to Similar Tools
+
+| Feature | CAP | Penelope | Pwncat | Netcat |
+|---------|-----|----------|--------|--------|
+| **Interactive listener** | ✅ | ✅ | ✅ | ❌ |
+| **Multi-session** | ✅ | ✅ | ✅ | ❌ |
+| **Auto-stabilization** | ✅ | ✅ | ✅ | ❌ |
+| **Session persistence** | ✅ | ❌ | ✅ | ❌ |
+| **Async I/O** | ✅ (tokio) | ❌ | ✅ (asyncio) | ❌ |
+| **True raw mode** | ✅ (termios) | ✅ | ✅ | ❌ |
+| **Single binary** | ✅ (Rust) | ❌ (Python) | ❌ (Python) | ✅ |
+| **Modules/plugins** | ❌ | ✅ | ✅ | ❌ |
+
+**CAP's niche:** Modern, minimal, reliable. Inspired by Penelope's clean UX, but built in Rust for a standalone binary with professional-grade async I/O.
 
 ---
 
@@ -151,30 +227,43 @@ CAP is written in Rust for memory safety, performance, and reliability. It produ
 
 CAP is under **active development** and will remain **open-source**.
 
+### Current Features
+- ✅ Interactive listener with interface/port selection
+- ✅ Multi-session management
+- ✅ True terminal passthrough (byte-for-byte forwarding)
+- ✅ Async I/O with tokio
+- ✅ Session metadata and notes
+- ✅ Clean, minimal UI
+- ✅ Terminal-aware rendering
+
 ### Roadmap
-- [ ] Interactive privilege escalation module
-- [ ] Extended protocol support (SMB, SSH)
-- [ ] Session history and replay
-- [ ] Custom payload generation
-- [ ] Enhanced web module capabilities
+- [ ] Session logging (all commands + output to file)
+- [ ] File upload/download
+- [ ] In-memory script execution (LinPEAS, linux-smart-enumeration)
+- [ ] Multi-shell spawning (multiple PTY sessions per target)
+- [ ] Auto-reconnection improvements
+- [ ] TAB completion in menu
 
 Contributions, bug reports, and feature requests are welcome.
 
 ---
 
-## Installation Details
+## Installation Examples
 
 ### Linux (Debian/Ubuntu/Kali/Parrot)
 
 ```bash
-# Install Rust via package manager
-sudo apt update
-sudo apt install cargo rustc
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
 
 # Clone and build
 git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
+
+# Optional: install to system
+sudo cp target/release/cap /usr/local/bin/
 ```
 
 ### Linux (Arch-based)
@@ -192,10 +281,7 @@ cargo build --release
 ### macOS
 
 ```bash
-# Install Rust via Homebrew
-brew install rust
-
-# Or use the official installer
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone and build
@@ -203,19 +289,6 @@ git clone https://github.com/declanmiddleton/cap.git
 cd cap
 cargo build --release
 ```
-
-### Windows
-
-```powershell
-# Install Rust from https://rustup.rs (select MSVC toolchain)
-
-# Clone and build
-git clone https://github.com/declanmiddleton/cap.git
-cd cap
-cargo build --release
-```
-
-**Note:** Windows Defender may flag security tools. Add exclusions in lab environments as needed.
 
 ---
 
@@ -237,8 +310,8 @@ This tool is provided for **authorized security testing and research purposes on
 
 - **Issues:** [GitHub Issues](https://github.com/declanmiddleton/cap/issues)
 - **Contributions:** Pull requests welcome
-- **Documentation:** See `examples/` directory for usage guides
+- **Documentation:** See source code for implementation details
 
 ---
 
-*CAP — Because time spent upgrading shells is time not spent finding vulnerabilities.*
+*CAP — A reverse shell handler that gets out of your way.*
