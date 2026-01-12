@@ -47,6 +47,7 @@ pub struct ShellSession {
     pub output_rx: Arc<RwLock<mpsc::UnboundedReceiver<String>>>,
     pub reconnect_attempts: Arc<RwLock<u32>>,
     pub max_reconnect_attempts: u32,
+    pub is_stabilizing: Arc<RwLock<bool>>,
 }
 
 impl ShellSession {
@@ -72,11 +73,13 @@ impl ShellSession {
         let state = Arc::new(RwLock::new(ShellState::Active));
         let stream_arc = Arc::new(RwLock::new(Some(stream)));
         let output_buffer = Arc::new(RwLock::new(Vec::new()));
+        let is_stabilizing = Arc::new(RwLock::new(true)); // Start in stabilizing mode
 
         // Spawn I/O handler
         let stream_clone = stream_arc.clone();
         let state_clone = state.clone();
         let buffer_clone = output_buffer.clone();
+        let stabilizing_clone = is_stabilizing.clone();
         let id_clone = id.clone();
 
         tokio::spawn(async move {
@@ -85,6 +88,7 @@ impl ShellSession {
                 stream_clone,
                 state_clone,
                 buffer_clone,
+                stabilizing_clone,
                 input_rx,
                 output_tx,
             )
@@ -107,6 +111,7 @@ impl ShellSession {
             output_rx: Arc::new(RwLock::new(output_rx)),
             reconnect_attempts: Arc::new(RwLock::new(0)),
             max_reconnect_attempts: 3,
+            is_stabilizing,
         })
     }
 
@@ -178,6 +183,7 @@ impl ShellSession {
         stream: Arc<RwLock<Option<TcpStream>>>,
         state: Arc<RwLock<ShellState>>,
         buffer: Arc<RwLock<Vec<String>>>,
+        is_stabilizing: Arc<RwLock<bool>>,
         mut input_rx: mpsc::UnboundedReceiver<String>,
         output_tx: mpsc::UnboundedSender<String>,
     ) -> Result<()> {
@@ -214,8 +220,10 @@ impl ShellSession {
                             // Store in buffer
                             buffer.write().await.push(output.clone());
                             
-                            // Send to output channel
-                            let _ = output_tx.send(output);
+                            // Only send to output channel if NOT stabilizing
+                            if !*is_stabilizing.read().await {
+                                let _ = output_tx.send(output);
+                            }
                         }
                         Err(e) => {
                             error!("Read error on shell session {}: {}", id, e);
@@ -614,6 +622,9 @@ impl ShellSessionManager {
         
         // Clear the output buffer after stabilization to avoid duplicate output
         session.clear_output_buffer().await;
+        
+        // Disable stabilizing mode - allow shell output to flow normally now
+        *session.is_stabilizing.write().await = false;
     }
 }
 
