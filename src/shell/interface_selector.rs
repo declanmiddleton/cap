@@ -33,35 +33,16 @@ impl InterfaceSelector {
         
         let mut interfaces = Vec::new();
         
-        // Add localhost
-        interfaces.push(("lo (localhost)".to_string(), "127.0.0.1".parse()?));
+        interfaces.push(("all interfaces".to_string(), "0.0.0.0".parse()?));
+        interfaces.push(("localhost".to_string(), "127.0.0.1".parse()?));
         
-        // Add 0.0.0.0 (all interfaces)
-        interfaces.push(("all (0.0.0.0)".to_string(), "0.0.0.0".parse()?));
-        
-        // Try to get actual interface IP
-        // This is a simple heuristic - connect to external address to determine route
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
             if socket.connect("8.8.8.8:80").is_ok() {
                 if let Ok(addr) = socket.local_addr() {
                     let ip = addr.ip();
                     if !ip.is_loopback() && !ip.to_string().starts_with("0.0.0.0") {
-                        interfaces.push((format!("primary ({})", ip), ip));
+                        interfaces.push(("primary".to_string(), ip));
                     }
-                }
-            }
-        }
-        
-        // Add common private network interfaces
-        for (name, ip_str) in &[
-            ("tun0 (VPN)", "10.10.14.1"),
-            ("eth0", "192.168.1.100"),
-            ("wlan0", "192.168.1.101"),
-        ] {
-            if let Ok(ip) = ip_str.parse() {
-                // Only add if not duplicate
-                if !interfaces.iter().any(|(_, existing_ip)| existing_ip == &ip) {
-                    interfaces.push((name.to_string(), ip));
                 }
             }
         }
@@ -75,13 +56,16 @@ impl InterfaceSelector {
 
     pub async fn select(&mut self) -> Result<String> {
         println!();
-        self.print_colored("◉ ", PRIMARY_COLOR);
-        println!("Select interface\n");
+        self.print_colored("  Interface ", PRIMARY_COLOR);
+        self.print_colored("↑↓", SECONDARY_COLOR);
+        print!(" or ");
+        self.print_colored("Tab", SECONDARY_COLOR);
+        print!(" to select · ");
+        self.print_colored("Enter", SECONDARY_COLOR);
+        print!(" to confirm\n\n");
         
         enable_raw_mode()?;
-        
         let result = self.run_selector().await;
-        
         disable_raw_mode()?;
         
         result
@@ -89,32 +73,27 @@ impl InterfaceSelector {
 
     async fn run_selector(&mut self) -> Result<String> {
         loop {
-            // Clear previous display
             print!("\r");
             execute!(io::stdout(), cursor::MoveUp(self.interfaces.len() as u16))?;
             
-            // Display all interfaces
             for (idx, (name, ip)) in self.interfaces.iter().enumerate() {
                 print!("\r");
                 execute!(io::stdout(), Clear(ClearType::CurrentLine))?;
                 
                 if idx == self.selected {
-                    // Selected interface
                     self.print_colored("  ◉ ", PRIMARY_COLOR);
-                    self.print_colored(&format!("{:20}", name), PRIMARY_COLOR);
-                    self.print_colored(&format!(" {}", ip), SECONDARY_COLOR);
+                    self.print_colored(&format!("{:15}", name), PRIMARY_COLOR);
+                    self.print_colored(&format!("{}", ip), SECONDARY_COLOR);
                 } else {
-                    // Unselected interface
                     self.print_colored("  ◦ ", MUTED_COLOR);
-                    print!("{:20} ", name.truecolor(120, 120, 130));
-                    print!("{}", ip.to_string().truecolor(100, 100, 110));
+                    print!("{:15}", name.truecolor(100, 100, 110));
+                    print!("{}", ip.to_string().truecolor(80, 80, 90));
                 }
                 println!();
             }
             
             io::stdout().flush()?;
             
-            // Handle input
             if event::poll(std::time::Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
                     match key.code {
@@ -131,15 +110,14 @@ impl InterfaceSelector {
                         KeyCode::Enter => {
                             let selected_ip = self.interfaces[self.selected].1.to_string();
                             
-                            // Clear the selector display
+                            // Clear interface list
                             for _ in 0..self.interfaces.len() {
                                 execute!(io::stdout(), cursor::MoveUp(1), Clear(ClearType::CurrentLine))?;
                             }
                             
-                            // Show confirmation
-                            print!("\r");
-                            self.print_colored("◉ ", PRIMARY_COLOR);
-                            print!("Interface: ");
+                            // Show selected IP
+                            self.print_colored("  ◉ ", PRIMARY_COLOR);
+                            self.print_colored("Interface  ", PRIMARY_COLOR);
                             self.print_colored(&selected_ip, SECONDARY_COLOR);
                             println!("\n");
                             
