@@ -79,16 +79,12 @@ impl InterfaceSelector {
     }
 
     pub async fn select(&mut self) -> Result<String> {
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        self.print_colored("  Interface Selection", PRIMARY_COLOR);
         println!();
-        self.print_colored("  Interface ", PRIMARY_COLOR);
-        self.print_colored("↑↓", SECONDARY_COLOR);
-        print!(" or ");
-        self.print_colored("Tab", SECONDARY_COLOR);
-        print!(" to select · ");
-        self.print_colored("Enter", SECONDARY_COLOR);
-        print!(" to confirm · ");
-        self.print_colored("Ctrl+C", MUTED_COLOR);
-        print!(" to cancel\n\n");
+        println!("{}", "  Use ↑↓ or Tab to select · Enter to confirm · Ctrl+C to cancel".truecolor(120, 120, 130));
+        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+        println!();
         
         enable_raw_mode()?;
         let result = self.run_selector().await;

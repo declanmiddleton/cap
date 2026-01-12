@@ -4,13 +4,14 @@ use crossterm::{
     cursor, execute,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style::{Color, Print, ResetColor, SetForegroundColor},
-    terminal::{disable_raw_mode, enable_raw_mode, size},
+    terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType},
 };
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::session::ShellSessionManager;
+use super::menu::MainMenu;
 
 // Modern color scheme
 const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };    // #2596be
@@ -18,6 +19,11 @@ const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };   // #5621d5
 const SUCCESS_COLOR: Color = Color::Rgb { r: 80, g: 200, b: 120 };
 const WARNING_COLOR: Color = Color::Rgb { r: 255, g: 180, b: 80 };
 const MUTED_COLOR: Color = Color::Rgb { r: 120, g: 120, b: 130 };
+
+pub enum InteractionResult {
+    Detached,      // User pressed Esc to return to menu
+    SessionEnded,  // Session terminated
+}
 
 pub struct InteractiveTerminal {
     manager: Arc<ShellSessionManager>,
@@ -32,23 +38,57 @@ impl InteractiveTerminal {
         // Show welcome banner (no raw mode yet)
         self.show_welcome_banner()?;
         
-        // Wait for a session to become active
+        // Main loop: wait for session or show menu
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            
-            if let Some(session) = self.manager.get_active_session().await {
-                // Wait for stabilization to complete
-                while *session.is_stabilizing.read().await {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            // Wait for a session to become active
+            let session = loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                
+                if let Some(sess) = self.manager.get_active_session().await {
+                    // Wait for stabilization to complete
+                    while *sess.is_stabilizing.read().await {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    }
+                    break sess;
                 }
                 
-                // Stabilization complete - now enter pure interactive mode
-                self.enter_interactive_mode(session).await?;
-                break;
+                // Check if we have any sessions (backgrounded)
+                if self.manager.session_count() > 0 {
+                    // Show menu
+                    let mut menu = MainMenu::new(self.manager.clone());
+                    if let Some(session_id) = menu.run().await? {
+                        // User selected a session - set it as active
+                        let _ = self.manager.set_active_session(&session_id).await;
+                        // Continue loop to wait for it to be active
+                    } else {
+                        // User quit menu - continue waiting
+                        self.show_welcome_banner()?;
+                    }
+                }
+            };
+            
+            // Stabilization complete - now enter pure interactive mode
+            match self.enter_interactive_mode(session).await? {
+                InteractionResult::Detached => {
+                    // User pressed Ctrl+D or Esc - return to menu
+                    let mut menu = MainMenu::new(self.manager.clone());
+                    if let Some(session_id) = menu.run().await? {
+                        // User selected a session - set it as active
+                        let _ = self.manager.set_active_session(&session_id).await;
+                        continue;
+                    } else {
+                        // User quit menu - show welcome and wait
+                        self.show_welcome_banner()?;
+                        continue;
+                    }
+                }
+                InteractionResult::SessionEnded => {
+                    // Session ended - show welcome and wait for new connection
+                    self.show_welcome_banner()?;
+                    continue;
+                }
             }
         }
-        
-        Ok(())
     }
 
     fn show_welcome_banner(&self) -> Result<()> {
@@ -65,7 +105,7 @@ impl InteractiveTerminal {
         let _ = execute!(io::stdout(), SetForegroundColor(color), Print(text), ResetColor);
     }
 
-    async fn enter_interactive_mode(&self, session: Arc<super::session::ShellSession>) -> Result<()> {
+    async fn enter_interactive_mode(&self, session: Arc<super::session::ShellSession>) -> Result<InteractionResult> {
         // CRITICAL: Reset terminal state completely before interactive mode
         self.reset_terminal_state()?;
         
@@ -78,6 +118,8 @@ impl InteractiveTerminal {
             let _ = session.send_command(format!("stty rows {} cols {} 2>/dev/null\n", rows, cols)).await;
         }
         
+        let mut detach_requested = false;
+        
         // Main interactive loop - pure passthrough
         loop {
             tokio::select! {
@@ -87,6 +129,7 @@ impl InteractiveTerminal {
                         match event::read()? {
                             Event::Key(key) => {
                                 if self.handle_key(key, &session).await? {
+                                    detach_requested = true;
                                     break; // Detach requested
                                 }
                             }
@@ -122,18 +165,30 @@ impl InteractiveTerminal {
         disable_raw_mode()?;
         self.reset_terminal_state()?;
         
-        println!();
-        self.print_colored("◦  ", MUTED_COLOR);
-        println!("{}", "Session ended".truecolor(120, 120, 130));
-        println!();
-        
-        Ok(())
+        if detach_requested {
+            // Background the session
+            let _ = self.manager.background_session(&session.id).await;
+            
+            println!();
+            self.print_colored("◦  ", MUTED_COLOR);
+            println!("{}", "Session backgrounded - returning to menu".truecolor(120, 120, 130));
+            println!();
+            
+            Ok(InteractionResult::Detached)
+        } else {
+            println!();
+            self.print_colored("◦  ", MUTED_COLOR);
+            println!("{}", "Session ended".truecolor(120, 120, 130));
+            println!();
+            
+            Ok(InteractionResult::SessionEnded)
+        }
     }
 
     async fn handle_key(&self, key: KeyEvent, session: &Arc<super::session::ShellSession>) -> Result<bool> {
         match (key.code, key.modifiers) {
-            // Ctrl+D = detach (special CAP command)
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            // Esc or Ctrl+D = detach (return to menu)
+            (KeyCode::Esc, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
                 return Ok(true); // Signal detach
             }
             

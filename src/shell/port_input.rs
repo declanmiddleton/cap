@@ -11,19 +11,22 @@ use std::io::{self, Write};
 const PRIMARY_COLOR: Color = Color::Rgb { r: 37, g: 150, b: 190 };
 const SECONDARY_COLOR: Color = Color::Rgb { r: 86, g: 33, b: 213 };
 const MUTED_COLOR: Color = Color::Rgb { r: 120, g: 120, b: 130 };
+const WARNING_COLOR: Color = Color::Rgb { r: 255, g: 180, b: 80 };
 
 fn print_colored(text: &str, color: Color) {
     let _ = execute!(io::stdout(), SetForegroundColor(color), Print(text), ResetColor);
 }
 
 pub fn get_port_input() -> Result<u16> {
-    // Port appears directly under IP
-    print_colored("  ◉ ", PRIMARY_COLOR);
-    print_colored("Port       ", PRIMARY_COLOR);
+    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+    print_colored("  Port Configuration", PRIMARY_COLOR);
+    println!();
+    println!("{}", "  Type port number · Enter to confirm · Ctrl+C to cancel".truecolor(120, 120, 130));
+    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+    println!();
+    
+    print_colored("  ◉ Port: ", PRIMARY_COLOR);
     print_colored("4444", SECONDARY_COLOR);
-    print!("  ");
-    print_colored("Enter", MUTED_COLOR);
-    print!(" to confirm");
     io::stdout().flush()?;
     
     enable_raw_mode()?;
@@ -37,14 +40,16 @@ pub fn get_port_input() -> Result<u16> {
                 match key.code {
                     KeyCode::Enter => {
                         disable_raw_mode()?;
-                        println!("\n");
+                        println!();
+                        println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".truecolor(37, 150, 190));
+                        println!();
                         
                         match input.parse::<u16>() {
                             Ok(port) if port > 0 => {
                                 return Ok(port);
                             }
                             _ => {
-                                print_colored("  ◉ ", PRIMARY_COLOR);
+                                print_colored("  ⚠  ", WARNING_COLOR);
                                 println!("Invalid port, using 4444\n");
                                 return Ok(4444);
                             }
@@ -57,12 +62,8 @@ pub fn get_port_input() -> Result<u16> {
                         // Redraw
                         print!("\r");
                         execute!(io::stdout(), Clear(ClearType::CurrentLine))?;
-                        print_colored("  ◉ ", PRIMARY_COLOR);
-                        print_colored("Port       ", PRIMARY_COLOR);
+                        print_colored("  ◉ Port: ", PRIMARY_COLOR);
                         print_colored(&input, SECONDARY_COLOR);
-                        print!("  ");
-                        print_colored("Enter", MUTED_COLOR);
-                        print!(" to confirm");
                         io::stdout().flush()?;
                     }
                     KeyCode::Backspace => {
@@ -73,12 +74,8 @@ pub fn get_port_input() -> Result<u16> {
                             // Redraw
                             print!("\r");
                             execute!(io::stdout(), Clear(ClearType::CurrentLine))?;
-                            print_colored("  ◉ ", PRIMARY_COLOR);
-                            print_colored("Port       ", PRIMARY_COLOR);
+                            print_colored("  ◉ Port: ", PRIMARY_COLOR);
                             print_colored(&input, SECONDARY_COLOR);
-                            print!("  ");
-                            print_colored("Enter", MUTED_COLOR);
-                            print!(" to confirm");
                             io::stdout().flush()?;
                         }
                     }
