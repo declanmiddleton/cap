@@ -17,10 +17,11 @@ use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "cap")]
-#[command(about = "Security assessment tool for authorized penetration testing", long_about = None)]
+#[command(about = "Modern terminal-based reverse shell handler", long_about = None)]
+#[command(after_help = "CAP is a shell handler built for reliability, clarity, and flow.\nFocus: listener and session management only.")]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     #[arg(short, long)]
     verbose: bool,
@@ -28,7 +29,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start interactive shell listener (Penelope-style)
+    /// Start interactive shell listener
+    #[command(alias = "l")]
     Listen {
         #[arg(short, long, default_value = "0.0.0.0")]
         host: String,
@@ -37,88 +39,106 @@ enum Commands {
         port: u16,
     },
 
-    /// Interactive session management
-    Session {
-        #[command(subcommand)]
-        action: SessionAction,
+    /// List active shell sessions
+    #[command(alias = "ls")]
+    Sessions,
+
+    /// Attach to a backgrounded session
+    Attach {
+        /// Session ID to attach to
+        id: String,
     },
 
-    /// Shell session management (list, interact, kill)
-    Shell {
-        #[command(subcommand)]
-        action: ShellAction,
+    /// Kill a session
+    Kill {
+        /// Session ID to terminate
+        id: String,
     },
 
-    /// List available modules
-    Modules,
-
-    /// List available wordlists
-    Wordlists {
-        #[arg(short, long)]
-        search: Option<String>,
+    /// Add a note to a session
+    Note {
+        /// Session ID
+        id: String,
+        /// Note text
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
     },
 
-    /// Execute security modules
-    Module {
-        #[arg(short, long)]
-        name: String,
-
-        #[arg(short, long)]
-        target: String,
-
-        #[arg(long)]
-        wordlist: Option<String>,
-
-        #[arg(long)]
-        threads: Option<usize>,
-
-        #[arg(long)]
-        verbose: bool,
-
-        #[arg(long, value_delimiter = ',')]
-        status_codes: Option<Vec<u16>>,
-
-        #[arg(long, value_delimiter = ',')]
-        exclude_codes: Option<Vec<u16>>,
-    },
-
-    /// Generate a payload/task for a module
-    Generate {
-        #[arg(short, long)]
-        module: String,
-
-        #[arg(short, long)]
-        target: String,
-
-        #[arg(short, long)]
-        output: Option<String>,
-    },
-    
-    /// Web application security testing (SSTI, SQLi, Fingerprinting)
+    /// Legacy web testing (deprecated - use dedicated tools)
+    #[command(hide = true)]
     Web {
         #[command(subcommand)]
         action: WebAction,
     },
 
-    /// Manage scope and authorized targets
+    /// Legacy module commands (deprecated)
+    #[command(hide = true)]
+    Modules,
+
+    #[command(hide = true)]
+    Module {
+        #[arg(short, long)]
+        name: String,
+        #[arg(short, long)]
+        target: String,
+        #[arg(long)]
+        wordlist: Option<String>,
+        #[arg(long)]
+        threads: Option<usize>,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long, value_delimiter = ',')]
+        status_codes: Option<Vec<u16>>,
+        #[arg(long, value_delimiter = ',')]
+        exclude_codes: Option<Vec<u16>>,
+    },
+
+    #[command(hide = true)]
+    Generate {
+        #[arg(short, long)]
+        module: String,
+        #[arg(short, long)]
+        target: String,
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    #[command(hide = true)]
     Scope {
         #[command(subcommand)]
         action: ScopeAction,
     },
 
-    /// View audit logs and session history
+    #[command(hide = true)]
     Audit {
         #[arg(long)]
         session_id: Option<String>,
-
         #[arg(long)]
         export: Option<String>,
     },
 
-    /// Initialize a new project workspace
+    #[command(hide = true)]
     Init {
         #[arg(short, long)]
         name: String,
+    },
+
+    #[command(hide = true)]
+    Wordlists {
+        #[arg(short, long)]
+        search: Option<String>,
+    },
+
+    #[command(hide = true)]
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
+    #[command(hide = true)]
+    Shell {
+        #[command(subcommand)]
+        action: ShellAction,
     },
 }
 
@@ -230,8 +250,8 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
-    // Check if this is a listen command - suppress logging for clean output
-    let is_listen = matches!(cli.command, Commands::Listen { .. });
+    // Check if this is a listen command or no command (default listen) - suppress logging for clean output
+    let is_listen = matches!(cli.command, Some(Commands::Listen { .. })) || cli.command.is_none();
 
     // Initialize logging
     let log_level = if is_listen {
@@ -257,7 +277,31 @@ async fn main() -> Result<()> {
     let session_manager = SessionManager::new(config.clone());
 
     match cli.command {
-        Commands::Listen { host, port } => {
+        // Default: Start listener
+        None => {
+            let manager = Arc::new(ShellSessionManager::new());
+            let listener = ShellListener::new(manager.clone());
+            
+            let host = "0.0.0.0".to_string();
+            let port = 4444;
+            
+            // Start listener in background
+            let listen_host = host.clone();
+            tokio::spawn(async move {
+                if let Err(e) = listener.start_with_cleanup(&listen_host, port).await {
+                    eprintln!("[!] Shell listener error: {}", e);
+                }
+            });
+            
+            // Give listener time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Start interactive terminal
+            let mut terminal = InteractiveTerminal::new(manager);
+            terminal.run().await?;
+        }
+        
+        Some(Commands::Listen { host, port }) => {
             let manager = Arc::new(ShellSessionManager::new());
             let listener = ShellListener::new(manager.clone());
             
@@ -276,19 +320,36 @@ async fn main() -> Result<()> {
             let mut terminal = InteractiveTerminal::new(manager);
             terminal.run().await?;
         }
-        Commands::Modules => {
+        
+        Some(Commands::Sessions) => {
+            handle_sessions_list().await?;
+        }
+        
+        Some(Commands::Attach { id }) => {
+            handle_session_attach(&id).await?;
+        }
+        
+        Some(Commands::Kill { id }) => {
+            handle_session_kill(&id).await?;
+        }
+        
+        Some(Commands::Note { id, text }) => {
+            handle_session_note(&id, text.join(" ")).await?;
+        }
+        
+        Some(Commands::Modules) => {
             handle_list_modules();
         }
-        Commands::Wordlists { search } => {
+        Some(Commands::Wordlists { search }) => {
             handle_list_wordlists(search);
         }
-        Commands::Session { action } => {
+        Some(Commands::Session { action }) => {
             handle_session_action(action, session_manager).await?;
         }
-        Commands::Shell { action } => {
+        Some(Commands::Shell { action }) => {
             handle_shell_action(action).await?;
         }
-        Commands::Module {
+        Some(Commands::Module {
             name,
             target,
             wordlist,
@@ -296,7 +357,7 @@ async fn main() -> Result<()> {
             verbose,
             status_codes,
             exclude_codes,
-        } => {
+        }) => {
             handle_module_execution(
                 name,
                 target,
@@ -310,30 +371,115 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Generate {
+        Some(Commands::Generate {
             module,
             target,
             output,
-        } => {
+        }) => {
             handle_generate_payload(module, target, output, &config).await?;
         }
-        Commands::Web { action } => {
+        Some(Commands::Web { action }) => {
             handle_web_action(action).await?;
         }
-        Commands::Scope { action } => {
+        Some(Commands::Scope { action }) => {
             handle_scope_action(action, &config).await?;
         }
-        Commands::Audit {
+        Some(Commands::Audit {
             session_id,
             export,
-        } => {
+        }) => {
             handle_audit_command(session_id, export, &config).await?;
         }
-        Commands::Init { name } => {
+        Some(Commands::Init { name }) => {
             handle_init_command(name).await?;
         }
     }
 
+    Ok(())
+}
+
+// New simplified handlers for shell-first commands
+async fn handle_sessions_list() -> Result<()> {
+    use colored::Colorize;
+    
+    let state_file = "shell_sessions.json";
+    
+    println!();
+    println!("{}", "Sessions".truecolor(37, 150, 190));
+    println!();
+    
+    if std::path::Path::new(state_file).exists() {
+        let content = tokio::fs::read_to_string(state_file).await?;
+        if let Ok(sessions) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+            if sessions.is_empty() {
+                println!("  {} none", "◦".truecolor(120, 120, 130));
+            } else {
+                for session in sessions {
+                    let id = session["id"].as_str().unwrap_or("unknown");
+                    let addr = session["remote_addr"].as_str().unwrap_or("unknown");
+                    let hostname = session.get("hostname").and_then(|h| h.as_str());
+                    let username = session.get("username").and_then(|u| u.as_str());
+                    let privilege = session.get("privilege").and_then(|p| p.as_str()).unwrap_or("Unknown");
+                    
+                    let indicator = match session["state"].as_str() {
+                        Some("Active") => "◉".truecolor(37, 150, 190),
+                        Some("Background") => "◎".truecolor(86, 33, 213),
+                        _ => "◦".truecolor(120, 120, 130),
+                    };
+                    
+                    print!("  {} ", indicator);
+                    
+                    if let Some(host) = hostname {
+                        print!("{}", host.truecolor(37, 150, 190));
+                    } else {
+                        print!("{}", addr.truecolor(37, 150, 190));
+                    }
+                    
+                    if let Some(user) = username {
+                        print!(" ({})", user.truecolor(86, 33, 213));
+                    }
+                    
+                    if privilege == "Root" {
+                        print!(" {}", "⚡".truecolor(255, 180, 80));
+                    }
+                    
+                    println!(" {}", &id[..8].truecolor(120, 120, 130));
+                }
+            }
+        } else {
+            println!("  {} none", "◦".truecolor(120, 120, 130));
+        }
+    } else {
+        println!("  {} none", "◦".truecolor(120, 120, 130));
+    }
+    
+    println!();
+    Ok(())
+}
+
+async fn handle_session_attach(_id: &str) -> Result<()> {
+    use colored::Colorize;
+    println!();
+    println!("{}", "Session attachment not yet implemented".truecolor(120, 120, 130));
+    println!("{}", "Use 'cap listen' to start a new listener".truecolor(86, 33, 213));
+    println!();
+    Ok(())
+}
+
+async fn handle_session_kill(_id: &str) -> Result<()> {
+    use colored::Colorize;
+    println!();
+    println!("{}", "Session termination not yet implemented".truecolor(120, 120, 130));
+    println!();
+    Ok(())
+}
+
+async fn handle_session_note(_id: &str, _note: String) -> Result<()> {
+    use colored::Colorize;
+    println!();
+    println!("{}", "Session notes not yet implemented".truecolor(120, 120, 130));
+    println!("{}", "Use Ctrl+N during an active session".truecolor(86, 33, 213));
+    println!();
     Ok(())
 }
 

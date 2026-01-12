@@ -19,8 +19,6 @@ pub fn display_banner() {
     println!("{}", banner.truecolor(37, 150, 190));
     
     // Secondary color #5621d5 (RGB: 86, 33, 213)
-    println!("{}", "  Modern terminal-based reverse shell handler".truecolor(86, 33, 213));
-    
-    // Muted color for authorization notice
-    println!("{}", "  Authorized use only\n".truecolor(120, 120, 130));
+    println!("{}", "  Shell handler built for reliability, clarity, and flow".truecolor(86, 33, 213));
+    println!("{}", "  Listener and session management only\n".truecolor(120, 120, 130));
 }
